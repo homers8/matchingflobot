@@ -31,17 +31,19 @@ WEBHOOK_URL = "https://matchingflobot.onrender.com/webhook"
 # FastAPI & Telegram
 app = FastAPI()
 application = Application.builder().token(TOKEN).build()
+
+# ✅ Handler registrieren (vor startup!)
+application.add_handler(CommandHandler("start", start := lambda u, c: u.message.reply_text(
+    "Willkommen bei MatchingFloBot!\nStarte ein Spiel mit /play oder über Inline-Nutzung.")))
+application.add_handler(CommandHandler("play", play := lambda u, c: asyncio.create_task(play_game(u, c))))
+application.add_handler(CallbackQueryHandler(callback_handler := lambda u, c: asyncio.create_task(handle_callback(u, c))))
+application.add_handler(InlineQueryHandler(inline_query := lambda u, c: asyncio.create_task(handle_inline_query(u, c))))
+
+# Spielzustand
 games = {}
 
-# --- Bot-Handler ---
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "Willkommen bei MatchingFloBot!\n"
-        "Starte ein Spiel mit /play oder über Inline-Nutzung."
-    )
-
-async def play(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# Spiel starten
+async def play_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id
 
@@ -52,20 +54,19 @@ async def play(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "player2_choice": None,
     }
 
-    keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("Schere ✂️", callback_data="choice_scissors"),
-            InlineKeyboardButton("Stein 🪨", callback_data="choice_rock"),
-            InlineKeyboardButton("Papier 📄", callback_data="choice_paper"),
-        ]
-    ])
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("Schere ✂️", callback_data="choice_scissors"),
+        InlineKeyboardButton("Stein 🪨", callback_data="choice_rock"),
+        InlineKeyboardButton("Papier 📄", callback_data="choice_paper"),
+    ]])
 
     await update.message.reply_text(
         "Du bist Spieler 1. Warte auf Spieler 2 und wähle deine Option:",
         reply_markup=keyboard
     )
 
-async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# Callback-Handling
+async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user_id = query.from_user.id
@@ -73,11 +74,12 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
 
     if chat_id not in games:
-        await query.message.reply_text("⚠️ Keine laufende Partie in diesem Chat. Starte mit /play.")
+        await query.message.reply_text("⚠️ Keine laufende Partie. Starte mit /play.")
         return
 
     game = games[chat_id]
 
+    # Spieler 2 setzen
     if game["player2"] is None and user_id != game["player1"]:
         game["player2"] = user_id
 
@@ -101,7 +103,7 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.message.reply_text("Du hast bereits gewählt!")
             return
         game["player1_choice"] = choice
-    elif user_id == game["player2"]:
+    else:
         if game["player2_choice"]:
             await query.message.reply_text("Du hast bereits gewählt!")
             return
@@ -134,15 +136,16 @@ def determine_winner(choice1, choice2):
     else:
         return "🏆 Spieler 2 gewinnt!"
 
-async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
+# Inline-Query-Handling
+async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.inline_query.from_user
-    keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("Schere ✂️", callback_data="choice_scissors"),
-            InlineKeyboardButton("Stein 🪨", callback_data="choice_rock"),
-            InlineKeyboardButton("Papier 📄", callback_data="choice_paper"),
-        ]
-    ])
+    logger.info(f"⚙️ Inline-Query von {user.first_name} ({user.id})")
+
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("Schere ✂️", callback_data="choice_scissors"),
+        InlineKeyboardButton("Stein 🪨", callback_data="choice_rock"),
+        InlineKeyboardButton("Papier 📄", callback_data="choice_paper"),
+    ]])
 
     results = [
         InlineQueryResultArticle(
@@ -169,20 +172,14 @@ async def telegram_webhook(request: Request):
 
 @app.get("/", response_class=PlainTextResponse)
 async def root():
-    return "✅ MatchingFloBot is running."
+    return "MatchingFloBot is running."
 
 @app.on_event("startup")
 async def on_startup():
     await application.bot.set_webhook(WEBHOOK_URL)
     logger.info(f"🌐 Webhook gesetzt auf: {WEBHOOK_URL}")
 
-# --- Handler registrieren ---
-application.add_handler(CommandHandler("start", start))
-application.add_handler(CommandHandler("play", play))
-application.add_handler(CallbackQueryHandler(callback_handler))
-application.add_handler(InlineQueryHandler(inline_query))
-
-# --- Start ---
+# --- Bot starten ---
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=10000)
