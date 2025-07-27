@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: matchingflobot
+    runtime: python
+    region: frankfurt  # oder us-central, je nach Wunsch
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn main:app --host=0.0.0.0 --port=$PORT
+    envVars:
+      - key: TOKEN
+        value: your-telegram-bot-token-here  # Optional, falls du ihn nicht hardcoden willst
+    plan: free
+    autoDeploy: true
