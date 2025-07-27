@@ -14,6 +14,8 @@ from telegram.ext import (
     InlineQueryHandler,
     CallbackQueryHandler,
     ContextTypes,
+    MessageHandler,
+    filters,
 )
 
 logging.basicConfig(
@@ -22,20 +24,18 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 TOKEN = "8010815430:AAFfc0QxiqgSdrJA5Ndu5MXDJsnLr0OFvNw"
-WEBHOOK_URL = "https://matchingflobot.onrender.com/webhook"  # Deine HTTPS Webhook-URL
+WEBHOOK_URL = "https://matchingflobot.onrender.com/webhook"
 
 app = FastAPI()
 application = Application.builder().token(TOKEN).build()
 
-# Beispiel-Spielstatus speichern wir einfach im Speicher (dict) - nur Demo, kein Persistenz
 games = {}
 
 # --- Telegram Handler ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Willkommen zum Schere-Stein-Papier Spiel!\n"
-        "Starte eine Partie mit /play"
+        "Willkommen zum Schere-Stein-Papier Spiel!\nStarte eine Partie mit /play"
     )
 
 
@@ -43,7 +43,6 @@ async def play(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
     chat_id = update.effective_chat.id
 
-    # Einfaches Spiel initialisieren, Spieler 1 ist der Anfragende
     games[chat_id] = {
         "player1": user_id,
         "player1_choice": None,
@@ -52,13 +51,11 @@ async def play(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
 
     keyboard = InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton("Schere ✂️", callback_data="choice_scissors"),
-                InlineKeyboardButton("Stein 🪨", callback_data="choice_rock"),
-                InlineKeyboardButton("Papier 📄", callback_data="choice_paper"),
-            ]
-        ]
+        [[
+            InlineKeyboardButton("Schere ✂️", callback_data="choice_scissors"),
+            InlineKeyboardButton("Stein 🪨", callback_data="choice_rock"),
+            InlineKeyboardButton("Papier 📄", callback_data="choice_paper"),
+        ]]
     )
 
     await update.message.reply_text(
@@ -79,16 +76,13 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     game = games[chat_id]
 
-    # Spieler 2 zuweisen, falls noch frei
     if game["player2"] is None and user_id != game["player1"]:
         game["player2"] = user_id
 
-    # Check ob Spieler zugelassen
     if user_id != game["player1"] and user_id != game["player2"]:
         await query.answer("Du bist kein Teilnehmer dieses Spiels.")
         return
 
-    # Spielerwahl speichern
     choice_map = {
         "choice_scissors": "Schere",
         "choice_rock": "Stein",
@@ -113,7 +107,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     await query.answer(f"Deine Wahl: {choice}")
 
-    # Prüfe ob beide gewählt haben
     if game["player1_choice"] and game["player2_choice"]:
         result_text = determine_winner(game["player1_choice"], game["player2_choice"])
         await query.message.reply_text(
@@ -122,7 +115,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Spieler 2: {game['player2_choice']}\n\n"
             f"{result_text}"
         )
-        # Spiel löschen
         del games[chat_id]
     else:
         await query.message.reply_text("Warte auf die Wahl des anderen Spielers...")
@@ -136,10 +128,7 @@ def determine_winner(choice1, choice2):
         "Stein": "Schere",
         "Papier": "Stein",
     }
-    if wins[choice1] == choice2:
-        return "Spieler 1 gewinnt!"
-    else:
-        return "Spieler 2 gewinnt!"
+    return "Spieler 1 gewinnt!" if wins[choice1] == choice2 else "Spieler 2 gewinnt!"
 
 
 async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -155,18 +144,25 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.inline_query.answer(results, cache_time=0)
 
 
-# Registriere Handler
+# === Debug-Handler für alle Nachrichten ===
+async def debug_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    print("📥 DEBUG: Update erhalten:", update)
+
+
+# === Handler registrieren ===
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CommandHandler("play", play))
 application.add_handler(CallbackQueryHandler(callback_handler))
 application.add_handler(InlineQueryHandler(inline_query))
+application.add_handler(MessageHandler(filters.ALL, debug_handler))  # <- DEBUG
 
 
-# --- FastAPI Webhook Endpoint ---
+# --- FastAPI Webhook ---
 
 @app.post("/webhook")
 async def telegram_webhook(request: Request):
     data = await request.json()
+    print("📬 Webhook empfangen:", data)  # <== DEBUG
     update = Update.de_json(data, application.bot)
     await application.update_queue.put(update)
     return {"ok": True}
@@ -180,7 +176,6 @@ async def root():
 if __name__ == "__main__":
     import uvicorn
 
-    loop = asyncio.get_event_loop()
-    loop.run_until_complete(application.bot.set_webhook(WEBHOOK_URL))
-
+    asyncio.run(application.bot.set_webhook(WEBHOOK_URL))
+    print(f"🌐 Webhook gesetzt auf: {WEBHOOK_URL}")
     uvicorn.run(app, host="0.0.0.0", port=10000)
