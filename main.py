@@ -14,8 +14,6 @@ from telegram.ext import (
     InlineQueryHandler,
     CallbackQueryHandler,
     ContextTypes,
-    MessageHandler,
-    filters,
 )
 
 logging.basicConfig(
@@ -35,9 +33,9 @@ games = {}
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
-        "Willkommen zum Schere-Stein-Papier Spiel!\nStarte eine Partie mit /play"
+        "Willkommen zum Schere-Stein-Papier Spiel!\n"
+        "Starte eine Partie mit /play"
     )
-
 
 async def play(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -51,18 +49,19 @@ async def play(update: Update, context: ContextTypes.DEFAULT_TYPE):
     }
 
     keyboard = InlineKeyboardMarkup(
-        [[
-            InlineKeyboardButton("Schere ✂️", callback_data="choice_scissors"),
-            InlineKeyboardButton("Stein 🪨", callback_data="choice_rock"),
-            InlineKeyboardButton("Papier 📄", callback_data="choice_paper"),
-        ]]
+        [
+            [
+                InlineKeyboardButton("Schere ✂️", callback_data="choice_scissors"),
+                InlineKeyboardButton("Stein 🪨", callback_data="choice_rock"),
+                InlineKeyboardButton("Papier 📄", callback_data="choice_paper"),
+            ]
+        ]
     )
 
     await update.message.reply_text(
         "Du bist Spieler 1. Warte auf Spieler 2 und wähle deine Option:",
         reply_markup=keyboard,
     )
-
 
 async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
@@ -119,7 +118,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await query.message.reply_text("Warte auf die Wahl des anderen Spielers...")
 
-
 def determine_winner(choice1, choice2):
     if choice1 == choice2:
         return "Unentschieden!"
@@ -128,8 +126,10 @@ def determine_winner(choice1, choice2):
         "Stein": "Schere",
         "Papier": "Stein",
     }
-    return "Spieler 1 gewinnt!" if wins[choice1] == choice2 else "Spieler 2 gewinnt!"
-
+    if wins[choice1] == choice2:
+        return "Spieler 1 gewinnt!"
+    else:
+        return "Spieler 2 gewinnt!"
 
 async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.inline_query.query
@@ -143,39 +143,34 @@ async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]
     await update.inline_query.answer(results, cache_time=0)
 
+# --- Handler registrieren ---
 
-# === Debug-Handler für alle Nachrichten ===
-async def debug_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    print("📥 DEBUG: Update erhalten:", update)
-
-
-# === Handler registrieren ===
 application.add_handler(CommandHandler("start", start))
 application.add_handler(CommandHandler("play", play))
 application.add_handler(CallbackQueryHandler(callback_handler))
 application.add_handler(InlineQueryHandler(inline_query))
-application.add_handler(MessageHandler(filters.ALL, debug_handler))  # <- DEBUG
 
-
-# --- FastAPI Webhook ---
+# --- FastAPI Webhook Endpoint ---
 
 @app.post("/webhook")
 async def telegram_webhook(request: Request):
     data = await request.json()
-    print("📬 Webhook empfangen:", data)  # <== DEBUG
     update = Update.de_json(data, application.bot)
     await application.update_queue.put(update)
+    logger.info(f"📬 Webhook empfangen: {data}")
     return {"ok": True}
-
 
 @app.get("/")
 async def root():
     return {"message": "Telegram Bot läuft mit FastAPI"}
 
+@app.on_event("startup")
+async def on_startup():
+    await application.bot.set_webhook(WEBHOOK_URL)
+    print(f"🌐 Webhook gesetzt auf: {WEBHOOK_URL}")
+
+# --- Server starten ---
 
 if __name__ == "__main__":
     import uvicorn
-
-    asyncio.run(application.bot.set_webhook(WEBHOOK_URL))
-    print(f"🌐 Webhook gesetzt auf: {WEBHOOK_URL}")
     uvicorn.run(app, host="0.0.0.0", port=10000)
