@@ -4,7 +4,7 @@ from uuid import uuid4
 import logging
 from keep_alive import keep_alive
 
-TOKEN = "DEIN_BOT_TOKEN"  # <-- später über Umgebungsvariable setzen
+TOKEN = "8010815430:AAEKePd1ARnJk8CnG3UDS_oPYMb-Wlxl1gI"  # <-- später über Umgebungsvariable setzen
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
