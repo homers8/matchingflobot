@@ -1,18 +1,24 @@
 from flask import Flask, request
 from threading import Thread
+import asyncio
+from telegram import Update
 
 app = Flask(__name__)
-application = None  # wird gesetzt
+application = None  # wird später gesetzt
 
 @app.route('/', methods=['GET'])
 def home():
     return "Bot läuft! ✅"
 
 @app.route('/webhook', methods=['POST'])
-async def webhook():
+def webhook():
     if application:
-        update = request.get_json(force=True)
-        await application.update_queue.put(update)
+        try:
+            update = Update.de_json(request.get_json(force=True), application.bot)
+            asyncio.get_event_loop().create_task(application.update_queue.put(update))
+        except Exception as e:
+            print(f"Webhook-Fehler: {e}")
+            return "Fehler", 500
     return '', 200
 
 def run():
