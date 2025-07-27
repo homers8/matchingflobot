@@ -1,12 +1,12 @@
 import os
 import logging
-from uuid import uuid4
 from telegram.ext import Application, CommandHandler, InlineQueryHandler, CallbackQueryHandler, ContextTypes
 from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, InlineQueryResultArticle, InputTextMessageContent
-from keep_alive import keep_alive
+from uuid import uuid4
+from keep_alive import keep_alive  # Nur wenn du das Web-Interface nutzt
 
-# Token wird über Umgebungsvariable gelesen (Render.com)
-TOKEN = os.environ.get("TOKEN")
+# Token aus Umgebungsvariable lesen
+TOKEN = os.environ.get("TOKEN")  # in Render als Umgebungsvariable setzen
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
