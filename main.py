@@ -1,39 +1,56 @@
 import os
-import logging
-from telegram.ext import Application, CommandHandler, InlineQueryHandler, CallbackQueryHandler
-from telegram import Update, InlineQueryResultArticle, InputTextMessageContent, InlineKeyboardButton, InlineKeyboardMarkup
-from keep_alive import keep_alive
-from uuid import uuid4
+import asyncio
+from flask import Flask, request
+from telegram import Update, Bot
+from telegram.ext import Application, ApplicationBuilder
 
-TOKEN = os.environ.get("TOKEN")
-WEBHOOK_URL = "https://matchingflobot.onrender.com/webhook"
+# === Konfiguration ===
+TOKEN = os.getenv("BOT_TOKEN")  # z. B. in Render als Secret setzen
+WEBHOOK_URL = f"https://matchingflobot.onrender.com/webhook"
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+# === Flask Setup ===
+app = Flask(__name__)
 
-# Deine Spiellogik und Handler kommen hier...
+# === Telegram Bot Setup ===
+bot = Bot(token=TOKEN)
+application = ApplicationBuilder().token(TOKEN).build()
 
-async def main():
-    application = Application.builder().token(TOKEN).build()
+# === Webhook Route ===
+@app.route('/webhook', methods=['POST'])
+def webhook():
+    try:
+        update = Update.de_json(request.get_json(force=True), bot)
+        asyncio.get_event_loop().create_task(application.update_queue.put(update))
+        return "OK"
+    except Exception as e:
+        print(f"Fehler im Webhook: {e}")
+        return "Fehler", 500
 
-    # Register handlers
-    application.add_handler(CommandHandler("start", start))
-    application.add_handler(InlineQueryHandler(inlinequery))
-    application.add_handler(CallbackQueryHandler(button))
+# === Keep-Alive Route ===
+@app.route('/')
+def index():
+    return "Bot läuft ✅"
 
+# === Bot-Initialisierung ===
+async def setup():
+    await application.initialize()
+    await application.post_init()
     # Webhook setzen
-    await application.bot.set_webhook(WEBHOOK_URL)
+    await bot.set_webhook(url=WEBHOOK_URL)
+    print("✅ Webhook wurde gesetzt")
 
-    # Flask starten
-    keep_alive(application)
-
-    print("✅ Webhook-Modus aktiv – Flask nimmt Updates entgegen.")
-    # Wichtig: keine eigene run_webhook() o.ä. mehr nötig!
-    # Flask übernimmt den Listener
-    import asyncio
-    while True:
-        await asyncio.sleep(3600)  # damit main nicht beendet wird
-
+# === Startpunkt ===
 if __name__ == "__main__":
-    import asyncio
-    asyncio.run(main())
+    loop = asyncio.get_event_loop()
+
+    try:
+        loop.run_until_complete(setup())
+    except RuntimeError as e:
+        if "already running" in str(e):
+            loop.create_task(setup())
+        else:
+            raise
+
+    # Flask starten (Render startet automatisch auf PORT)
+    port = int(os.environ.get("PORT", 8080))
+    app.run(host="0.0.0.0", port=port)
