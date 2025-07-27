@@ -22,7 +22,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 TOKEN = "8010815430:AAFfc0QxiqgSdrJA5Ndu5MXDJsnLr0OFvNw"
-WEBHOOK_URL = "https://matchingflobot.onrender.com/"  # Deine HTTPS Webhook-URL
+WEBHOOK_URL = "https://matchingflobot.onrender.com/webhook"  # Deine HTTPS Webhook-URL
 
 app = FastAPI()
 application = Application.builder().token(TOKEN).build()
