@@ -9,10 +9,10 @@ from telegram import (
     InlineQueryResultArticle, InputTextMessageContent
 )
 from uuid import uuid4
-from keep_alive import keep_alive  # falls du Flask für Render nutzt
+from keep_alive import keep_alive
 
-# Bot-Token aus Umgebungsvariable
-TOKEN = os.environ.get("TOKEN")  # bei Render als Umgebungsvariable setzen
+TOKEN = os.environ.get("TOKEN")
+WEBHOOK_URL = f"https://matchingflobot.onrender.com/webhook"
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -95,15 +95,25 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_text(text=already_chosen, reply_markup=get_choice_keyboard())
 
 async def main():
-    keep_alive()
     application = Application.builder().token(TOKEN).build()
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(InlineQueryHandler(inlinequery))
     application.add_handler(CallbackQueryHandler(button))
 
-    print("Bot läuft…")
-    await application.run_polling()
+    # Webhook aktivieren
+    await application.bot.set_webhook(WEBHOOK_URL)
+
+    # Flask starten
+    keep_alive(application)
+
+    print("Bot läuft über Webhook…")
+    await application.run_webhook(
+        listen="0.0.0.0",
+        port=8080,
+        webhook_url=WEBHOOK_URL
+    )
+
 if __name__ == "__main__":
     import asyncio
     asyncio.run(main())
