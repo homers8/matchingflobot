@@ -1,175 +1,190 @@
-import os
-import logging
 import asyncio
-from flask import Flask, request
+import logging
+from fastapi import FastAPI, Request
 from telegram import (
-    InlineQueryResultArticle, InputTextMessageContent,
-    InlineKeyboardMarkup, InlineKeyboardButton, Update
+    Update,
+    InlineQueryResultArticle,
+    InputTextMessageContent,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
 )
 from telegram.ext import (
-    Application, ContextTypes, InlineQueryHandler,
-    CallbackQueryHandler
+    Application,
+    CommandHandler,
+    InlineQueryHandler,
+    CallbackQueryHandler,
+    ContextTypes,
 )
-from uuid import uuid4
 
-# === Bot-Konfiguration ===
-TOKEN = os.environ.get("BOT_TOKEN") or "DEIN_BOT_TOKEN_HIER"
-WEBHOOK_URL = os.environ.get("WEBHOOK_URL") or "https://matchingflobot.onrender.com/webhook"
+logging.basicConfig(
+    format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
+)
+logger = logging.getLogger(__name__)
 
-app = Flask(__name__)
-logging.basicConfig(level=logging.INFO)
+TOKEN = "DEIN_BOT_TOKEN_HIER"
+WEBHOOK_URL = "https://deine-domain.de/webhook"  # Deine HTTPS Webhook-URL
 
+app = FastAPI()
 application = Application.builder().token(TOKEN).build()
 
-# === Spiellogik ===
-
+# Beispiel-Spielstatus speichern wir einfach im Speicher (dict) - nur Demo, kein Persistenz
 games = {}
-stats = {}
 
-CHOICES = {
-    "rock": "🪨 Stein",
-    "paper": "📄 Papier",
-    "scissors": "✂️ Schere"
-}
+# --- Telegram Handler ---
 
-WINNING_COMBOS = {
-    ("rock", "scissors"),
-    ("paper", "rock"),
-    ("scissors", "paper")
-}
-
-def evaluate_game(choice1, choice2):
-    if choice1 == choice2:
-        return 0
-    if (choice1, choice2) in WINNING_COMBOS:
-        return 1
-    return 2
-
-def get_medal(wins):
-    if wins >= 5:
-        return "🏆"
-    elif wins >= 3:
-        return "🥈"
-    elif wins >= 1:
-        return "🥉"
-    else:
-        return ""
-
-# === Inline-Handler ===
-
-async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query_id = str(uuid4())
-    games[query_id] = {
-        "players": {},
-        "votes": {},
-        "message_id": None
-    }
-
-    button_texts = ["🪨", "📄", "✂️"]
-    button_data = ["rock", "paper", "scissors"]
-
-    keyboard = [
-        [InlineKeyboardButton(text, callback_data=f"{query_id}|{data}")]
-        for text, data in zip(button_texts, button_data)
-    ]
-
-    result = InlineQueryResultArticle(
-        id=query_id,
-        title="Schere, Stein, Papier spielen",
-        input_message_content=InputTextMessageContent("Wähle deine Waffe:"),
-        reply_markup=InlineKeyboardMarkup(keyboard)
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "Willkommen zum Schere-Stein-Papier Spiel!\n"
+        "Starte eine Partie mit /play"
     )
 
-    await update.inline_query.answer([result], cache_time=0)
 
-# === Button-Handler ===
+async def play(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
 
-async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Einfaches Spiel initialisieren, Spieler 1 ist der Anfragende
+    games[chat_id] = {
+        "player1": user_id,
+        "player1_choice": None,
+        "player2": None,
+        "player2_choice": None,
+    }
+
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("Schere ✂️", callback_data="choice_scissors"),
+                InlineKeyboardButton("Stein 🪨", callback_data="choice_rock"),
+                InlineKeyboardButton("Papier 📄", callback_data="choice_paper"),
+            ]
+        ]
+    )
+
+    await update.message.reply_text(
+        "Du bist Spieler 1. Warte auf Spieler 2 und wähle deine Option:",
+        reply_markup=keyboard,
+    )
+
+
+async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()
+    user_id = query.from_user.id
+    chat_id = query.message.chat_id
+    data = query.data
 
-    try:
-        query_id, choice = query.data.split("|")
-        user = query.from_user
-        game = games.get(query_id)
+    if chat_id not in games:
+        await query.answer("Keine laufende Partie in diesem Chat. Starte mit /play")
+        return
 
-        if not game:
-            await query.edit_message_text("❌ Spiel nicht gefunden.")
+    game = games[chat_id]
+
+    # Spieler 2 zuweisen, falls noch frei
+    if game["player2"] is None and user_id != game["player1"]:
+        game["player2"] = user_id
+
+    # Check ob Spieler zugelassen
+    if user_id != game["player1"] and user_id != game["player2"]:
+        await query.answer("Du bist kein Teilnehmer dieses Spiels.")
+        return
+
+    # Spielerwahl speichern
+    choice_map = {
+        "choice_scissors": "Schere",
+        "choice_rock": "Stein",
+        "choice_paper": "Papier",
+    }
+
+    choice = choice_map.get(data)
+    if choice is None:
+        await query.answer("Ungültige Auswahl.")
+        return
+
+    if user_id == game["player1"]:
+        if game["player1_choice"] is not None:
+            await query.answer("Du hast schon gewählt!")
             return
-
-        user_id = user.id
-        if user_id in game["votes"]:
-            await query.answer("Du hast bereits gewählt!", show_alert=True)
+        game["player1_choice"] = choice
+    else:
+        if game["player2_choice"] is not None:
+            await query.answer("Du hast schon gewählt!")
             return
+        game["player2_choice"] = choice
 
-        game["votes"][user_id] = choice
-        game["players"][user_id] = user.first_name
+    await query.answer(f"Deine Wahl: {choice}")
 
-        # Zwei Spieler?
-        if len(game["votes"]) == 2:
-            ids = list(game["votes"].keys())
-            c1, c2 = game["votes"][ids[0]], game["votes"][ids[1]]
-            n1, n2 = game["players"][ids[0]], game["players"][ids[1]]
+    # Prüfe ob beide gewählt haben
+    if game["player1_choice"] and game["player2_choice"]:
+        result_text = determine_winner(game["player1_choice"], game["player2_choice"])
+        await query.message.reply_text(
+            f"Ergebnis:\n"
+            f"Spieler 1: {game['player1_choice']}\n"
+            f"Spieler 2: {game['player2_choice']}\n\n"
+            f"{result_text}"
+        )
+        # Spiel löschen
+        del games[chat_id]
+    else:
+        await query.message.reply_text("Warte auf die Wahl des anderen Spielers...")
 
-            result = evaluate_game(c1, c2)
-            stats.setdefault(ids[0], {"wins": 0})
-            stats.setdefault(ids[1], {"wins": 0})
 
-            if result == 0:
-                text = f"🤝 Unentschieden!\nBeide wählten {CHOICES[c1]}"
-            elif result == 1:
-                stats[ids[0]]["wins"] += 1
-                text = f"{CHOICES[c1]} schlägt {CHOICES[c2]}!\n🏅 {n1} gewinnt! {get_medal(stats[ids[0]]['wins'])}"
-            else:
-                stats[ids[1]]["wins"] += 1
-                text = f"{CHOICES[c2]} schlägt {CHOICES[c1]}!\n🏅 {n2} gewinnt! {get_medal(stats[ids[1]]['wins'])}"
+def determine_winner(choice1, choice2):
+    if choice1 == choice2:
+        return "Unentschieden!"
+    wins = {
+        "Schere": "Papier",
+        "Stein": "Schere",
+        "Papier": "Stein",
+    }
+    if wins[choice1] == choice2:
+        return "Spieler 1 gewinnt!"
+    else:
+        return "Spieler 2 gewinnt!"
 
-            again_button = InlineKeyboardMarkup([[
-                InlineKeyboardButton("🔁 Nochmal spielen", switch_inline_query_current_chat="")
-            ]])
 
-            await query.edit_message_text(text, reply_markup=again_button)
-            del games[query_id]
-        else:
-            await query.edit_message_text("✅ Deine Wahl wurde gespeichert.\nWarte auf den Mitspieler...")
+async def inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.inline_query.query
+    results = [
+        InlineQueryResultArticle(
+            id="1",
+            title="Schere-Stein-Papier Spiel starten",
+            input_message_content=InputTextMessageContent("/play"),
+            description="Starte ein Schere-Stein-Papier Spiel mit /play",
+        )
+    ]
+    await update.inline_query.answer(results, cache_time=0)
 
-    except Exception as e:
-        logging.exception("Fehler im Callback:", exc_info=e)
-        await query.edit_message_text("❌ Ein Fehler ist aufgetreten.")
 
-# === Webhook-Route ===
+# Registriere Handler
+application.add_handler(CommandHandler("start", start))
+application.add_handler(CommandHandler("play", play))
+application.add_handler(CallbackQueryHandler(callback_handler))
+application.add_handler(InlineQueryHandler(inline_query))
 
-@app.route("/webhook", methods=["POST"])
-def webhook():
-    try:
-        update = Update.de_json(request.get_json(force=True), application.bot)
-        asyncio.run(application.process_update(update))
-    except Exception as e:
-        logging.exception("❌ Fehler im Webhook:", exc_info=e)
-    return "OK"
 
-@app.route("/", methods=["GET"])
-def home():
-    return "MatchingFloBot läuft ✅"
+# --- FastAPI Webhook Endpoint ---
 
-# === Startup-Funktionen ===
+@app.post("/webhook")
+async def telegram_webhook(request: Request):
+    data = await request.json()
+    update = Update.de_json(data, application.bot)
+    await application.update_queue.put(update)
+    return {"ok": True}
 
-async def setup_webhook():
-    await application.bot.delete_webhook()
-    await application.bot.set_webhook(url=WEBHOOK_URL)
-    print("✅ Webhook wurde gesetzt")
 
-async def main():
-    await application.initialize()
-    await setup_webhook()
+@app.get("/")
+async def root():
+    return {"message": "Telegram Bot läuft mit FastAPI"}
 
-# === Handler registrieren ===
-
-application.add_handler(InlineQueryHandler(handle_inline_query))
-application.add_handler(CallbackQueryHandler(handle_callback_query))
-
-# === Main Startpunkt ===
 
 if __name__ == "__main__":
+    import uvicorn
+
+    async def main():
+        # Webhook setzen
+        await application.bot.set_webhook(WEBHOOK_URL)
+        # Starte Bot (Update-Loop startet automatisch im Hintergrund)
+        # Starte FastAPI Server
+        uvicorn.run(app, host="0.0.0.0", port=10000)
+
     asyncio.run(main())
-    app.run(host="0.0.0.0", port=10000)
