@@ -1,11 +1,15 @@
 import os
 import asyncio
+import logging
 from flask import Flask, request
 from telegram import Update, Bot
 from telegram.ext import Application, ApplicationBuilder
 
+# === Logging aktivieren ===
+logging.basicConfig(level=logging.INFO)
+
 # === Konfiguration ===
-TOKEN = os.getenv("BOT_TOKEN")  # z. B. in Render als Secret setzen
+TOKEN = os.getenv("BOT_TOKEN")
 WEBHOOK_URL = f"https://matchingflobot.onrender.com/webhook"
 
 # === Flask Setup ===
@@ -15,7 +19,7 @@ app = Flask(__name__)
 bot = Bot(token=TOKEN)
 application = ApplicationBuilder().token(TOKEN).build()
 
-# === Webhook Route (korrigiert) ===
+# === Webhook Route (mit logging.exception) ===
 @app.route('/webhook', methods=['POST'])
 def webhook():
     try:
@@ -25,8 +29,8 @@ def webhook():
             asyncio.get_event_loop()
         )
         return "OK"
-    except Exception as e:
-        print(f"Fehler im Webhook: {e}")
+    except Exception:
+        logging.exception("❌ Fehler im Webhook:")
         return "Fehler", 500
 
 # === Keep-Alive Route ===
