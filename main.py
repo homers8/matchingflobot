@@ -180,11 +180,7 @@ async def root():
 if __name__ == "__main__":
     import uvicorn
 
-    async def main():
-        # Webhook setzen
-        await application.bot.set_webhook(WEBHOOK_URL)
-        # Starte Bot (Update-Loop startet automatisch im Hintergrund)
-        # Starte FastAPI Server
-        uvicorn.run(app, host="0.0.0.0", port=10000)
+    loop = asyncio.get_event_loop()
+    loop.run_until_complete(application.bot.set_webhook(WEBHOOK_URL))
 
-    asyncio.run(main())
+    uvicorn.run(app, host="0.0.0.0", port=10000)
