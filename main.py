@@ -1,12 +1,18 @@
 import os
 import logging
-from telegram.ext import Application, CommandHandler, InlineQueryHandler, CallbackQueryHandler, ContextTypes
-from telegram import Update, InlineKeyboardMarkup, InlineKeyboardButton, InlineQueryResultArticle, InputTextMessageContent
+from telegram.ext import (
+    Application, CommandHandler, InlineQueryHandler,
+    CallbackQueryHandler, ContextTypes
+)
+from telegram import (
+    Update, InlineKeyboardMarkup, InlineKeyboardButton,
+    InlineQueryResultArticle, InputTextMessageContent
+)
 from uuid import uuid4
-from keep_alive import keep_alive  # Nur wenn du das Web-Interface nutzt
+from keep_alive import keep_alive  # falls du Flask für Render nutzt
 
-# Token aus Umgebungsvariable lesen
-TOKEN = os.environ.get("TOKEN")  # in Render als Umgebungsvariable setzen
+# Bot-Token aus Umgebungsvariable
+TOKEN = os.environ.get("TOKEN")  # bei Render als Umgebungsvariable setzen
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -22,7 +28,9 @@ def determine_winner(c1: str, c2: str) -> int:
     return 1 if wins[c1] == c2 else 2
 
 def get_choice_keyboard():
-    return InlineKeyboardMarkup([[InlineKeyboardButton(text=c, callback_data=f"choice:{c}") for c in CHOICES]])
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(text=c, callback_data=f"choice:{c}") for c in CHOICES]
+    ])
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("Tippe @DeinBotName in einen Chat, um Schere, Stein, Papier zu spielen.")
@@ -32,7 +40,8 @@ async def inlinequery(update: Update, context: ContextTypes.DEFAULT_TYPE):
         id=str(uuid4()),
         title="🕹️ Schere, Stein, Papier spielen",
         input_message_content=InputTextMessageContent("🕹️ Spiel gestartet: Wähle deine Option!"),
-        reply_markup=get_choice_keyboard())
+        reply_markup=get_choice_keyboard()
+    )
     await update.inline_query.answer([result], cache_time=0)
 
 async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -85,14 +94,20 @@ async def button(update: Update, context: ContextTypes.DEFAULT_TYPE):
     already_chosen = "\n".join(f"{info['name']} hat gewählt. ✅" for info in players.values())
     await query.edit_message_text(text=already_chosen, reply_markup=get_choice_keyboard())
 
-def main():
+async def main():
     keep_alive()
     application = Application.builder().token(TOKEN).build()
+
     application.add_handler(CommandHandler("start", start))
     application.add_handler(InlineQueryHandler(inlinequery))
     application.add_handler(CallbackQueryHandler(button))
+
     print("Bot läuft…")
-    application.run_polling()
+    await application.initialize()
+    await application.start()
+    await application.updater.start_polling()
+    await application.updater.idle()
 
 if __name__ == "__main__":
-    main()
+    import asyncio
+    asyncio.run(main())
