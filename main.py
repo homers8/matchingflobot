@@ -178,7 +178,12 @@ async def on_startup():
     logger.info(f"🌐 Webhook gesetzt auf: {WEBHOOK_URL}")
 
 # --- Bot starten ---
+from fastapi.responses import PlainTextResponse
 
+@app.get("/", response_class=PlainTextResponse)
+async def root():
+    return "MatchingFloBot is running."
+    
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=10000)
