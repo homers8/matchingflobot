@@ -21,8 +21,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-TOKEN = "DEIN_BOT_TOKEN_HIER"
-WEBHOOK_URL = "https://deine-domain.de/webhook"  # Deine HTTPS Webhook-URL
+TOKEN = "8010815430:AAFfc0QxiqgSdrJA5Ndu5MXDJsnLr0OFvNw"
+WEBHOOK_URL = "https://matchingflobot.onrender.com/"  # Deine HTTPS Webhook-URL
 
 app = FastAPI()
 application = Application.builder().token(TOKEN).build()
