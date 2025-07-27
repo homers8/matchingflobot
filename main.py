@@ -3,6 +3,8 @@ import logging
 import uuid
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
+from fastapi import FastAPI
+from contextlib import asynccontextmanager
 from telegram import (
     Update,
     InlineQueryResultArticle,
@@ -28,12 +30,30 @@ logger = logging.getLogger(__name__)
 TOKEN = "8010815430:AAFfc0QxiqgSdrJA5Ndu5MXDJsnLr0OFvNw"
 WEBHOOK_URL = "https://matchingflobot.onrender.com/webhook"
 
-# FastAPI & Telegram
-app = FastAPI()
+# Telegram Application
 application = Application.builder().token(TOKEN).updater(None).build()
 
 # Spielzustand
 games = {}
+
+# Lifespan-Funktion (ersetzt startup)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await application.initialize()
+    await application.bot.set_webhook(WEBHOOK_URL)
+    logger.info(f"🌐 Webhook gesetzt auf: {WEBHOOK_URL}")
+    yield
+    await application.shutdown()
+
+# FastAPI App mit Lifespan
+app = FastAPI(lifespan=lifespan)
+
+# --- Handler-Registrierung ---
+application.add_handler(CommandHandler("start", lambda u, c: u.message.reply_text(
+    "Willkommen bei MatchingFloBot!\nStarte ein Spiel mit /play oder über Inline-Nutzung.")))
+application.add_handler(CommandHandler("play", lambda u, c: asyncio.create_task(play_game(u, c))))
+application.add_handler(CallbackQueryHandler(lambda u, c: asyncio.create_task(handle_callback(u, c))))
+application.add_handler(InlineQueryHandler(lambda u, c: asyncio.create_task(handle_inline_query(u, c))))
 
 # Spiel starten
 async def play_game(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -115,7 +135,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await query.message.reply_text("⏳ Warte auf die Wahl des anderen Spielers...")
 
-# Gewinner bestimmen
+# Gewinnerlogik
 def determine_winner(choice1, choice2):
     if choice1 == choice2:
         return "🔁 Unentschieden!"
@@ -129,7 +149,7 @@ def determine_winner(choice1, choice2):
     else:
         return "🏆 Spieler 2 gewinnt!"
 
-# Inline-Query-Handling
+# Inline-Query
 async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.inline_query.from_user
     logger.info(f"⚙️ Inline-Query von {user.first_name} ({user.id})")
@@ -153,13 +173,6 @@ async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE
     ]
     await update.inline_query.answer(results, cache_time=0)
 
-# Handlers registrieren
-application.add_handler(CommandHandler("start", start := lambda u, c: u.message.reply_text(
-    "Willkommen bei MatchingFloBot!\nStarte ein Spiel mit /play oder über Inline-Nutzung.")))
-application.add_handler(CommandHandler("play", lambda u, c: asyncio.create_task(play_game(u, c))))
-application.add_handler(CallbackQueryHandler(lambda u, c: asyncio.create_task(handle_callback(u, c))))
-application.add_handler(InlineQueryHandler(lambda u, c: asyncio.create_task(handle_inline_query(u, c))))
-
 # --- FastAPI Endpunkte ---
 
 @app.post("/webhook")
@@ -174,8 +187,7 @@ async def telegram_webhook(request: Request):
 async def root():
     return "MatchingFloBot is running."
 
-@app.on_event("startup")
-async def on_startup():
-    await application.initialize()
-    await application.bot.set_webhook(WEBHOOK_URL)
-    logger.info(f"🌐 Webhook gesetzt auf: {WEBHOOK_URL}")
+# --- Start lokal (optional) ---
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run(app, host="0.0.0.0", port=10000)
