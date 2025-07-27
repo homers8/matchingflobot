@@ -1,10 +1,10 @@
 import asyncio
 import logging
 import uuid
+from contextlib import asynccontextmanager
+
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
-from fastapi import FastAPI
-from contextlib import asynccontextmanager
 from telegram import (
     Update,
     InlineQueryResultArticle,
@@ -36,7 +36,7 @@ application = Application.builder().token(TOKEN).updater(None).build()
 # Spielzustand
 games = {}
 
-# Lifespan-Funktion (ersetzt startup)
+# Lifespan-Funktion (statt @app.on_event("startup"))
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await application.initialize()
@@ -186,8 +186,3 @@ async def telegram_webhook(request: Request):
 @app.get("/", response_class=PlainTextResponse)
 async def root():
     return "MatchingFloBot is running."
-
-# --- Start lokal (optional) ---
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=10000)
