@@ -5,7 +5,7 @@ from telegram import Update, Bot
 from telegram.ext import Application, ApplicationBuilder
 
 # === Konfiguration ===
-TOKEN = os.getenv("BOT_TOKEN")  # z. B. in Render als Secret setzen
+TOKEN = os.getenv("BOT_TOKEN")  # In Render als Secret setzen
 WEBHOOK_URL = f"https://matchingflobot.onrender.com/webhook"
 
 # === Flask Setup ===
@@ -34,14 +34,21 @@ def index():
 # === Bot-Initialisierung ===
 async def setup():
     await application.initialize()
-    await application.post_init()
+    # Nur ausführen, wenn post_init gesetzt ist (Vermeidung von NoneType-Fehler)
+    if application.post_init:
+        await application.post_init()
     # Webhook setzen
     await bot.set_webhook(url=WEBHOOK_URL)
     print("✅ Webhook wurde gesetzt")
 
 # === Startpunkt ===
 if __name__ == "__main__":
-    loop = asyncio.get_event_loop()
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        asyncio.set_event_loop(loop)
+        loop = asyncio.get_event_loop()
 
     try:
         loop.run_until_complete(setup())
