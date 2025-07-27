@@ -2,9 +2,9 @@ import asyncio
 import logging
 import uuid
 import os
-from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
+from contextlib import asynccontextmanager
 from telegram import (
     Update,
     InlineQueryResultArticle,
@@ -20,28 +20,26 @@ from telegram.ext import (
     ContextTypes,
 )
 
-# Logging
+# Logging aktivieren
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# --- Konfiguration über Umgebungsvariablen ---
+# Konfiguration per Environment Variables (Render Dashboard)
 TOKEN = os.getenv("TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL")
 
-if not TOKEN:
-    raise RuntimeError("❌ Telegram BOT-TOKEN fehlt! Bitte Umgebungsvariable TOKEN setzen.")
-if not WEBHOOK_URL:
-    raise RuntimeError("❌ WEBHOOK_URL fehlt! Bitte Umgebungsvariable WEBHOOK_URL setzen.")
+if not TOKEN or not WEBHOOK_URL:
+    raise ValueError("❌ TOKEN und WEBHOOK_URL müssen als Environment Variables gesetzt sein.")
 
-# Telegram Application
+# Telegram-Bot-Anwendung
 application = Application.builder().token(TOKEN).updater(None).build()
 
-# Spielzustand
+# Spielzustände speichern
 games = {}
 
-# Lifespan-Funktion (ersetzt startup)
+# Lifespan-Handler (statt veralteter startup-Ereignisse)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await application.initialize()
@@ -50,10 +48,10 @@ async def lifespan(app: FastAPI):
     yield
     await application.shutdown()
 
-# FastAPI App mit Lifespan
+# FastAPI-App
 app = FastAPI(lifespan=lifespan)
 
-# --- Handler-Registrierung ---
+# --- Telegram Handler ---
 application.add_handler(CommandHandler("start", lambda u, c: u.message.reply_text(
     "Willkommen bei MatchingFloBot!\nStarte ein Spiel mit /play oder über Inline-Nutzung.")))
 application.add_handler(CommandHandler("play", lambda u, c: asyncio.create_task(play_game(u, c))))
@@ -179,6 +177,7 @@ async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.inline_query.answer(results, cache_time=0)
 
 # --- FastAPI Endpunkte ---
+
 @app.post("/webhook")
 async def telegram_webhook(request: Request):
     data = await request.json()
@@ -189,9 +188,9 @@ async def telegram_webhook(request: Request):
 
 @app.get("/", response_class=PlainTextResponse)
 async def root():
-    return "MatchingFloBot is running."
+    return "✅ MatchingFloBot is running."
 
-# --- Lokaler Start (optional) ---
+# --- Lokal testen ---
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=10000)
