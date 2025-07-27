@@ -1,166 +1,164 @@
 import os
+import logging
 import asyncio
 from flask import Flask, request
 from telegram import (
-    InlineQueryResultArticle, InputTextMessageContent, InlineKeyboardButton,
-    InlineKeyboardMarkup, Update
+    Bot,
+    InlineQueryResultArticle,
+    InputTextMessageContent,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
+    Update,
 )
 from telegram.ext import (
-    Application, ApplicationBuilder, ContextTypes,
-    InlineQueryHandler, CallbackQueryHandler
+    Application,
+    ContextTypes,
+    InlineQueryHandler,
+    CallbackQueryHandler,
 )
 from uuid import uuid4
 
-# === Konfiguration ===
-TOKEN = os.getenv("BOT_TOKEN")
-WEBHOOK_URL = f"https://matchingflobot.onrender.com/webhook"
+# Logging aktivieren
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-# === Zustände speichern ===
-games = {}       # message_id -> {player_id: choice, ...}
-user_stats = {}  # user_id -> {"wins": x, "losses": y, "draws": z}
+# Token und Bot initialisieren
+TOKEN = os.environ["BOT_TOKEN"]
+bot = Bot(token=TOKEN)
+application = Application.builder().token(TOKEN).build()
 
-# === Flask Setup ===
-app = Flask(__name__)
-application = ApplicationBuilder().token(TOKEN).build()
+# Spielzustand und Statistik
+games = {}
+stats = {}
 
-@app.route('/webhook', methods=['POST'])
-def webhook():
-    try:
-        update = Update.de_json(request.get_json(force=True), application.bot)
-        asyncio.run(application.process_update(update))
-        return "OK"
-    except Exception as e:
-        print(f"❌ Fehler im Webhook: {e}")
-        return "Fehler", 500
-
-@app.route('/')
-def index():
-    return "Bot läuft ✅"
-
-# === Spiel-Logik ===
-
-CHOICES = {
+# Spieloptionen
+OPTIONS = {
     "rock": "🪨 Stein",
     "paper": "📄 Papier",
-    "scissors": "✂️ Schere"
+    "scissors": "✂️ Schere",
 }
 
-BEATS = {
+# Spielregeln
+WIN_RULES = {
     "rock": "scissors",
     "scissors": "paper",
-    "paper": "rock"
+    "paper": "rock",
 }
 
-def build_choice_keyboard(game_id, user_id):
-    keyboard = [
-        [InlineKeyboardButton(CHOICES[c], callback_data=f"{game_id}|{c}")]
-        for c in CHOICES
-    ]
-    return InlineKeyboardMarkup(keyboard)
+# HTML escapen
+def esc(name):
+    return name.replace("<", "&lt;").replace(">", "&gt;")
 
-def build_result_keyboard():
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton("🔁 Nochmal spielen", switch_inline_query="")]
-    ])
-
+# Inline-Query-Handler
 async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query_id = str(uuid4())
-    message_content = InputTextMessageContent("Wähle deine Figur:")
-    keyboard = build_choice_keyboard(query_id, update.inline_query.from_user.id)
+    query = update.inline_query.query or "Schnick Schnack Schnuck"
+    game_id = str(uuid4())
+
+    keyboard = [
+        [
+            InlineKeyboardButton("🪨", callback_data=f"{game_id}|rock"),
+            InlineKeyboardButton("📄", callback_data=f"{game_id}|paper"),
+            InlineKeyboardButton("✂️", callback_data=f"{game_id}|scissors"),
+        ]
+    ]
 
     result = InlineQueryResultArticle(
-        id=query_id,
-        title="Schere, Stein, Papier spielen",
-        input_message_content=message_content,
-        reply_markup=keyboard
+        id=game_id,
+        title="Spiele Schnick Schnack Schnuck!",
+        input_message_content=InputTextMessageContent("Schnick Schnack Schnuck – wählt eure Option!"),
+        reply_markup=InlineKeyboardMarkup(keyboard),
     )
-    await update.inline_query.answer([result], cache_time=0)
 
+    # Initialisiere das Spiel
+    games[game_id] = {}
+
+    await update.inline_query.answer([result], cache_time=0)
+    logger.info(f"Neues Spiel gestartet: {game_id}")
+
+# Callback-Handler
 async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+    user_id = query.from_user.id
+    name = query.from_user.first_name
     await query.answer()
 
-    game_id, choice = query.data.split("|")
-    user = query.from_user
-    message = query.message
+    try:
+        game_id, choice = query.data.split("|")
+    except Exception:
+        return
 
     if game_id not in games:
-        games[game_id] = {}
-    players = games[game_id]
-
-    if user.id in players:
-        await query.edit_message_text(
-            text="⏳ Du hast bereits gewählt. Warte auf den anderen Spieler...",
-            reply_markup=None
-        )
         return
 
-    players[user.id] = choice
+    game = games[game_id]
 
-    if len(players) < 2:
-        await query.edit_message_text(
-            text="🕹️ Spieler 1 hat gewählt. Warte auf Spieler 2...",
-            reply_markup=None
-        )
+    if user_id in game:
+        await query.edit_message_text("Du hast bereits gewählt.")
         return
 
-    # Beide haben gewählt → auswerten
-    (id1, id2), (c1, c2) = list(players.items())[0], list(players.items())[1]
+    game[user_id] = {"name": name, "choice": choice}
 
-    name1 = (await context.bot.get_chat(id1)).first_name
-    name2 = (await context.bot.get_chat(id2)).first_name
+    # Wenn beide Spieler gewählt haben
+    if len(game) == 2:
+        players = list(game.values())
+        p1, p2 = players[0], players[1]
+        choice1, choice2 = p1["choice"], p2["choice"]
+        name1, name2 = esc(p1["name"]), esc(p2["name"])
 
-    def winner_text():
-        if c1 == c2:
-            return "🤝 Unentschieden!"
-        elif BEATS[c1] == c2:
-            return f"🏆 {name1} gewinnt!"
+        result_text = f"{OPTIONS[choice1]} {name1} vs. {OPTIONS[choice2]} {name2}\n\n"
+
+        if choice1 == choice2:
+            result_text += "Unentschieden! 🤝"
+        elif WIN_RULES[choice1] == choice2:
+            result_text += f"{name1} gewinnt! 🏆"
+            stats[name1] = stats.get(name1, 0) + 1
         else:
-            return f"🏆 {name2} gewinnt!"
+            result_text += f"{name2} gewinnt! 🏆"
+            stats[name2] = stats.get(name2, 0) + 1
 
-    # Statistik
-    def update_stats(winner_id, loser_id):
-        for uid in [winner_id, loser_id]:
-            if uid not in user_stats:
-                user_stats[uid] = {"wins": 0, "losses": 0, "draws": 0}
-        if c1 == c2:
-            user_stats[id1]["draws"] += 1
-            user_stats[id2]["draws"] += 1
-        elif BEATS[c1] == c2:
-            user_stats[id1]["wins"] += 1
-            user_stats[id2]["losses"] += 1
-        else:
-            user_stats[id2]["wins"] += 1
-            user_stats[id1]["losses"] += 1
+        # Füge Medaillen hinzu
+        for p in [name1, name2]:
+            if p in stats:
+                result_text += f"\n🥇 {p}: {stats[p]}"
 
-    update_stats(id1, id2)
+        # "Nochmal spielen"-Button
+        again_btn = InlineKeyboardMarkup.from_button(
+            InlineKeyboardButton("🔁 Nochmal spielen", switch_inline_query_current_chat="Schnick Schnack Schnuck")
+        )
 
-    stats1 = user_stats[id1]
-    stats2 = user_stats[id2]
+        await query.edit_message_text(result_text, reply_markup=again_btn, parse_mode="HTML")
 
-    result_text = (
-        f"{name1} wählte {CHOICES[c1]}\n"
-        f"{name2} wählte {CHOICES[c2]}\n\n"
-        f"{winner_text()}\n\n"
-        f"📊 {name1}: {stats1['wins']}W / {stats1['losses']}L / {stats1['draws']}U\n"
-        f"📊 {name2}: {stats2['wins']}W / {stats2['losses']}L / {stats2['draws']}U"
-    )
+        # Spiel löschen
+        del games[game_id]
+    else:
+        await query.edit_message_text(f"{name} hat gewählt... ⏳")
 
-    await query.edit_message_text(
-        text=result_text,
-        reply_markup=build_result_keyboard()
-    )
+# Flask Setup
+app = Flask(__name__)
 
-# === Setup ===
-async def setup():
-    await application.initialize()
-    await application.bot.set_webhook(WEBHOOK_URL)
-    print("✅ Webhook wurde gesetzt")
+@app.route("/")
+def index():
+    return "MatchingFloBot ist live! 🚀"
 
+@app.route("/webhook", methods=["POST"])
+def webhook():
+    update = Update.de_json(request.get_json(force=True), bot)
+    try:
+        asyncio.run(application.process_update(update))
+    except Exception as e:
+        logger.error("❌ Fehler im Webhook:", exc_info=e)
+    return "ok", 200
+
+# Telegram Handler registrieren
 application.add_handler(InlineQueryHandler(handle_inline_query))
 application.add_handler(CallbackQueryHandler(handle_callback_query))
 
+# Webhook setzen
+WEBHOOK_URL = os.environ.get("WEBHOOK_URL")
+if WEBHOOK_URL:
+    asyncio.run(bot.set_webhook(url=f"{WEBHOOK_URL}/webhook"))
+    logger.info("✅ Webhook wurde gesetzt")
+
+# Flask starten
 if __name__ == "__main__":
-    asyncio.run(setup())
-    port = int(os.environ.get("PORT", 8080))
-    app.run(host="0.0.0.0", port=port)
+    app.run(host="0.0.0.0", port=10000)
