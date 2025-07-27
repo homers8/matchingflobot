@@ -1,6 +1,8 @@
 import asyncio
 import logging
+import uuid
 from fastapi import FastAPI, Request
+from fastapi.responses import PlainTextResponse
 from telegram import (
     Update,
     InlineQueryResultArticle,
@@ -15,7 +17,6 @@ from telegram.ext import (
     CallbackQueryHandler,
     ContextTypes,
 )
-import uuid
 
 # Logging
 logging.basicConfig(
@@ -23,17 +24,16 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+# Konfiguration
 TOKEN = "8010815430:AAFfc0QxiqgSdrJA5Ndu5MXDJsnLr0OFvNw"
 WEBHOOK_URL = "https://matchingflobot.onrender.com/webhook"
 
-# FastAPI & Telegram-Application
+# FastAPI & Telegram
 app = FastAPI()
 application = Application.builder().token(TOKEN).build()
-
-# Game-Session Speicher
 games = {}
 
-# --- Handler ---
+# --- Bot-Handler ---
 
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
@@ -78,7 +78,6 @@ async def callback_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     game = games[chat_id]
 
-    # Spieler 2 automatisch setzen
     if game["player2"] is None and user_id != game["player1"]:
         game["player2"] = user_id
 
@@ -168,22 +167,22 @@ async def telegram_webhook(request: Request):
     await application.update_queue.put(update)
     return {"ok": True}
 
-@app.get("/")
+@app.get("/", response_class=PlainTextResponse)
 async def root():
-    return {"message": "Telegram Bot läuft mit FastAPI"}
+    return "✅ MatchingFloBot is running."
 
 @app.on_event("startup")
 async def on_startup():
     await application.bot.set_webhook(WEBHOOK_URL)
     logger.info(f"🌐 Webhook gesetzt auf: {WEBHOOK_URL}")
 
-# --- Bot starten ---
-from fastapi.responses import PlainTextResponse
+# --- Handler registrieren ---
+application.add_handler(CommandHandler("start", start))
+application.add_handler(CommandHandler("play", play))
+application.add_handler(CallbackQueryHandler(callback_handler))
+application.add_handler(InlineQueryHandler(inline_query))
 
-@app.get("/", response_class=PlainTextResponse)
-async def root():
-    return "MatchingFloBot is running."
-    
+# --- Start ---
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=10000)
