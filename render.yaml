@@ -1,19 +1,13 @@
-# render.yaml
-
 services:
   - type: web
     name: matchingflobot
-    env: python
-    region: frankfurt
-    plan: free
     runtime: python
-    buildCommand: "pip install -r requirements.txt"
+    buildCommand: ""
     startCommand: "python3 main.py"
-    autoDeploy: true
-    branch: main
-
     envVars:
       - key: TOKEN
-        value: dein_bot_token_hier
+        fromDashboard: true
       - key: WEBHOOK_URL
-        value: https://matchingflobot.onrender.com/webhook
+        fromDashboard: true
+    plan: free
+    autoDeploy: true
