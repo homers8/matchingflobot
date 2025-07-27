@@ -143,8 +143,7 @@ async def handle_callback_query(update: Update, context: ContextTypes.DEFAULT_TY
 def webhook():
     try:
         update = Update.de_json(request.get_json(force=True), application.bot)
-        loop = asyncio.get_event_loop()
-        loop.create_task(application.process_update(update))
+        asyncio.run(application.process_update(update))
     except Exception as e:
         logging.exception("❌ Fehler im Webhook:", exc_info=e)
     return "OK"
@@ -160,6 +159,10 @@ async def setup_webhook():
     await application.bot.set_webhook(url=WEBHOOK_URL)
     print("✅ Webhook wurde gesetzt")
 
+async def main():
+    await application.initialize()
+    await setup_webhook()
+
 # === Handler registrieren ===
 
 application.add_handler(InlineQueryHandler(handle_inline_query))
@@ -168,8 +171,5 @@ application.add_handler(CallbackQueryHandler(handle_callback_query))
 # === Main Startpunkt ===
 
 if __name__ == "__main__":
-    # Async init + webhook setzen
-    asyncio.run(application.initialize())
-    asyncio.run(setup_webhook())
-    # Flask starten
+    asyncio.run(main())
     app.run(host="0.0.0.0", port=10000)
