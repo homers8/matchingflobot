@@ -28,10 +28,10 @@ logger = logging.getLogger(__name__)
 
 # Konfiguration per Environment Variables (Render Dashboard)
 TOKEN = os.getenv("TOKEN")
-WEBHOOK_URL = os.getenv("WEBHOOK_URL")
+WEBHOOK_URL = "https://matchingflobot.onrender.com/webhook"
 
-if not TOKEN or not WEBHOOK_URL:
-    raise ValueError("❌ TOKEN und WEBHOOK_URL müssen als Environment Variables gesetzt sein.")
+if not TOKEN:
+    raise ValueError("❌ TOKEN muss als Environment Variable gesetzt sein.")
 
 # Telegram-Bot-Anwendung
 application = Application.builder().token(TOKEN).updater(None).build()
@@ -39,7 +39,7 @@ application = Application.builder().token(TOKEN).updater(None).build()
 # Spielzustände speichern
 games = {}
 
-# Lifespan-Handler (statt veralteter startup-Ereignisse)
+# Lifespan-Handler (statt startup/on_event)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await application.initialize()
@@ -190,7 +190,7 @@ async def telegram_webhook(request: Request):
 async def root():
     return "✅ MatchingFloBot is running."
 
-# --- Lokal testen ---
+# --- Lokal testen (optional) ---
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=10000)
