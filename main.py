@@ -30,14 +30,7 @@ WEBHOOK_URL = "https://matchingflobot.onrender.com/webhook"
 
 # FastAPI & Telegram
 app = FastAPI()
-application = Application.builder().token(TOKEN).build()
-
-# ✅ Handler registrieren (vor startup!)
-application.add_handler(CommandHandler("start", start := lambda u, c: u.message.reply_text(
-    "Willkommen bei MatchingFloBot!\nStarte ein Spiel mit /play oder über Inline-Nutzung.")))
-application.add_handler(CommandHandler("play", play := lambda u, c: asyncio.create_task(play_game(u, c))))
-application.add_handler(CallbackQueryHandler(callback_handler := lambda u, c: asyncio.create_task(handle_callback(u, c))))
-application.add_handler(InlineQueryHandler(inline_query := lambda u, c: asyncio.create_task(handle_inline_query(u, c))))
+application = Application.builder().token(TOKEN).updater(None).build()
 
 # Spielzustand
 games = {}
@@ -79,7 +72,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     game = games[chat_id]
 
-    # Spieler 2 setzen
     if game["player2"] is None and user_id != game["player1"]:
         game["player2"] = user_id
 
@@ -123,6 +115,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await query.message.reply_text("⏳ Warte auf die Wahl des anderen Spielers...")
 
+# Gewinner bestimmen
 def determine_winner(choice1, choice2):
     if choice1 == choice2:
         return "🔁 Unentschieden!"
@@ -160,6 +153,13 @@ async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE
     ]
     await update.inline_query.answer(results, cache_time=0)
 
+# Handlers registrieren
+application.add_handler(CommandHandler("start", start := lambda u, c: u.message.reply_text(
+    "Willkommen bei MatchingFloBot!\nStarte ein Spiel mit /play oder über Inline-Nutzung.")))
+application.add_handler(CommandHandler("play", lambda u, c: asyncio.create_task(play_game(u, c))))
+application.add_handler(CallbackQueryHandler(lambda u, c: asyncio.create_task(handle_callback(u, c))))
+application.add_handler(InlineQueryHandler(lambda u, c: asyncio.create_task(handle_inline_query(u, c))))
+
 # --- FastAPI Endpunkte ---
 
 @app.post("/webhook")
@@ -176,10 +176,6 @@ async def root():
 
 @app.on_event("startup")
 async def on_startup():
+    await application.initialize()
     await application.bot.set_webhook(WEBHOOK_URL)
     logger.info(f"🌐 Webhook gesetzt auf: {WEBHOOK_URL}")
-
-# --- Bot starten ---
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=10000)
