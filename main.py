@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 # Konfiguration per Environment Variables (z. B. auf Render)
 TOKEN = os.getenv("TOKEN")
-WEBHOOK_URL = "https://matchingflobot.onrender.com/webhook"
+WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://matchingflobot.onrender.com/webhook")
 
 if not TOKEN:
     raise ValueError("❌ TOKEN muss als Environment Variable gesetzt sein.")
