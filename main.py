@@ -22,6 +22,7 @@ if not TOKEN:
 
 # Telegram App
 application = Application.builder().token(TOKEN).updater(None).build()
+application.add_handler(InlineQueryHandler(lambda update, context: handle_inline_query(update, context)))  # ✅ Handler registrieren
 
 # FastAPI-App
 @asynccontextmanager
@@ -35,15 +36,13 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 # Inline-Handler
-from telegram import InlineQueryResultArticle, InputTextMessageContent
-
 async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info("⚙️ Inline-Query Verarbeitung gestartet")
 
     try:
         results = [
             InlineQueryResultArticle(
-                id="test123",
+                id=str(uuid.uuid4()),
                 title="🎮 Testantwort",
                 input_message_content=InputTextMessageContent("Dies ist eine Testantwort.")
             )
@@ -52,7 +51,8 @@ async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE
         logger.info("✅ Inline-Query erfolgreich beantwortet")
     except Exception as e:
         logger.exception(f"❌ Fehler bei Inline-Query: {e}")
-# FastAPI Endpoints
+
+# Webhook-Endpoint für Telegram
 @app.post("/webhook")
 async def telegram_webhook(request: Request):
     data = await request.json()
@@ -61,10 +61,12 @@ async def telegram_webhook(request: Request):
     await application.update_queue.put(update)
     return {"ok": True}
 
+# Startseite
 @app.get("/", response_class=PlainTextResponse)
 async def root():
     return "✅ MatchingFloBot minimal läuft."
 
+# Lokaler Start
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
