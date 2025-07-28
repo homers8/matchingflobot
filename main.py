@@ -155,7 +155,13 @@ def determine_winner(choice1, choice2):
 # Inline-Query
 async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.inline_query.from_user
-    logger.info(f"⚙️ Inline-Query von {user.first_name} ({user.id})")
+    query_text = update.inline_query.query.lower().strip()
+    logger.info(f"⚙️ Inline-Query von {user.first_name} ({user.id}) mit query='{query_text}'")
+
+    # Optional: Nur reagieren, wenn query leer oder sinnvoll ist
+    if query_text not in ["", "play", "spiel", "start", "rps"]:
+        logger.info("❌ Unpassende Inline-Query, keine Ergebnisse gesendet.")
+        return
 
     keyboard = InlineKeyboardMarkup([[
         InlineKeyboardButton("Schere ✂️", callback_data="choice_scissors"),
@@ -171,10 +177,11 @@ async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE
                 f"{user.first_name} hat ein Spiel gestartet! Wähle deine Option:"
             ),
             reply_markup=keyboard,
-            description="Starte ein Schere-Stein-Papier Spiel mit Auswahlbuttons",
+            description="Starte ein Spiel mit Auswahlbuttons",
         )
     ]
-    await update.inline_query.answer(results, cache_time=0)
+
+    await update.inline_query.answer(results, cache_time=0, is_personal=True)
 
 # --- FastAPI Webhook-Endpoint für Telegram ---
 @app.post("/webhook")
