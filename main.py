@@ -1,4 +1,23 @@
-import asyncio
+async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = update.inline_query.from_user
+    query_text = update.inline_query.query.lower().strip()
+    logger.info(f"⚙️ Inline-Query von {user.first_name} ({user.id}) mit query='{query_text}'")
+
+    # Erlaube z. B. bei leerem Query oder spezifischen Schlüsselwörtern
+    if query_text not in ["", "play", "spiel", "start", "rps"]:
+        logger.info("❌ Unpassende Inline-Query, keine Ergebnisse gesendet.")
+        return
+
+    result = InlineQueryResultArticle(
+        id=str(uuid.uuid4()),
+        title="🕹️ MatchingFloBot starten",
+        input_message_content=InputTextMessageContent(
+            f"{user.first_name} hat ein Spiel gestartet!\n\n👉 Schreibe /play um mitzuspielen!"
+        ),
+        description="Starte ein Spiel mit /play",
+    )
+
+    await update.inline_query.answer([result], cache_time=0, is_personal=True)
 import logging
 import uuid
 import os
