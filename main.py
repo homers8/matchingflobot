@@ -155,26 +155,21 @@ def determine_winner(choice1, choice2):
 
 # --- Inline-Query verarbeiten ---
 async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user = update.inline_query.from_user
-    query_text = update.inline_query.query.lower().strip()
-    logger.info(f"⚙️ Inline-Query von {user.first_name} ({user.id}) mit query='{query_text}'")
+    from telegram import InlineQueryResultArticle, InputTextMessageContent
+    import uuid
 
-    # Nur bei passendem Query antworten
-    if query_text not in ["", "play", "spiel", "start", "rps"]:
-        logger.info("❌ Unpassende Inline-Query, keine Ergebnisse gesendet.")
-        return
+    user = update.inline_query.from_user
+    logger.info(f"⚙️ Inline-Query empfangen von {user.first_name} ({user.id})")
 
     result = InlineQueryResultArticle(
         id=str(uuid.uuid4()),
-        title="🕹️ MatchingFloBot starten",
-        input_message_content=InputTextMessageContent(
-            f"{user.first_name} hat ein Spiel gestartet! 🎮\n\n👉 Tippe /play um mitzuspielen!"
-        ),
-        description="Starte ein Spiel mit /play",
+        title="🎲 Test: Schere-Stein-Papier starten",
+        input_message_content=InputTextMessageContent("Ein Spiel wurde gestartet! Tippe /play."),
+        description="Testspiel ohne Buttons",
     )
 
-    logger.info("✅ Sende Inline-Query-Ergebnis zurück")
     await update.inline_query.answer([result], cache_time=0, is_personal=True)
+    logger.info("✅ Inline-Query erfolgreich beantwortet")
 
 # --- Telegram Webhook ---
 @app.post("/webhook")
