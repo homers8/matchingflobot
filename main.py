@@ -168,8 +168,11 @@ async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE
         description="Testspiel ohne Buttons",
     )
 
-    await update.inline_query.answer([result], cache_time=0, is_personal=True)
-    logger.info("✅ Inline-Query erfolgreich beantwortet")
+    try:
+        await update.inline_query.answer([result], cache_time=0, is_personal=True)
+        logger.info("✅ Inline-Query erfolgreich beantwortet (Antwort wurde gesendet)")
+    except Exception as e:
+        logger.error(f"❌ Fehler beim Beantworten der Inline-Query: {e}")
 
 # --- Telegram Webhook ---
 @app.post("/webhook")
