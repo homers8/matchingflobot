@@ -44,7 +44,7 @@ async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE
         results = [
             InlineQueryResultArticle(
                 id="test123",
-                title="🎮 Testspiel",
+                title="🎮 Testantwort",
                 input_message_content=InputTextMessageContent("Dies ist eine Testantwort.")
             )
         ]
@@ -52,7 +52,6 @@ async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE
         logger.info("✅ Inline-Query erfolgreich beantwortet")
     except Exception as e:
         logger.exception(f"❌ Fehler bei Inline-Query: {e}")
-
 # FastAPI Endpoints
 @app.post("/webhook")
 async def telegram_webhook(request: Request):
