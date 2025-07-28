@@ -1,69 +1,48 @@
-import os
+import asyncio
 import logging
 import uuid
-import asyncio
+import os
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
 from telegram import (
     Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup,
     InlineQueryResultArticle,
     InputTextMessageContent,
+    InlineKeyboardMarkup,
+    InlineKeyboardButton,
 )
 from telegram.ext import (
     Application,
     CommandHandler,
-    CallbackQueryHandler,
     InlineQueryHandler,
+    CallbackQueryHandler,
     ContextTypes,
 )
 
-# --- Logging ---
+# Logging aktivieren
 logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO
 )
 logger = logging.getLogger(__name__)
 
-# --- Konfiguration ---
+# Konfiguration
 TOKEN = os.getenv("TOKEN")
 WEBHOOK_URL = "https://matchingflobot.onrender.com/webhook"
-
 if not TOKEN:
     raise ValueError("❌ TOKEN muss als Environment Variable gesetzt sein.")
 
-# --- Telegram Application ---
+# Telegram-Anwendung vorbereiten
 application = Application.builder().token(TOKEN).updater(None).build()
 
-# --- Spielzustände ---
+# Spielzustand pro Chat speichern
 games = {}
 
-# --- Lifespan (Startup + Shutdown) ---
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    await application.initialize()
-    await application.bot.set_webhook(WEBHOOK_URL)
-    logger.info(f"🌐 Webhook gesetzt auf: {WEBHOOK_URL}")
-    yield
-    await application.shutdown()
+# --- Handler-Funktionen ---
 
-# --- FastAPI App ---
-app = FastAPI(lifespan=lifespan)
-
-# --- Telegram Handler Registrierungen ---
-application.add_handler(CommandHandler("start", start_command))
-application.add_handler(CommandHandler("play", play_command))
-application.add_handler(CallbackQueryHandler(handle_callback))
-application.add_handler(InlineQueryHandler(handle_inline_query))
-
-# --- /start ---
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "👋 Willkommen bei MatchingFloBot!\n\nStarte ein Spiel mit /play oder über Inline-Nutzung (@MatchingFloBot)."
-    )
+    await update.message.reply_text("👋 Willkommen bei MatchingFloBot!\nStarte mit /play oder per Inline-Query.")
 
-# --- /play ---
 async def play_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     user_id = update.effective_user.id
@@ -82,11 +61,10 @@ async def play_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     ]])
 
     await update.message.reply_text(
-        "🧑‍🎮 Du bist Spieler 1. Warte auf Spieler 2 und wähle deine Option:",
+        "Du bist Spieler 1. Warte auf Spieler 2 und wähle deine Option:",
         reply_markup=keyboard
     )
 
-# --- Callback-Handling ---
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -143,7 +121,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await query.message.reply_text("⏳ Warte auf die Wahl des anderen Spielers...")
 
-# --- Gewinnerlogik ---
 def determine_winner(choice1, choice2):
     if choice1 == choice2:
         return "🔁 Unentschieden!"
@@ -157,10 +134,9 @@ def determine_winner(choice1, choice2):
     else:
         return "🏆 Spieler 2 gewinnt!"
 
-# --- Inline Query ---
 async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.inline_query.from_user
-    logger.info(f"⚙️ Inline-Query von {user.first_name} ({user.id}) mit query='{update.inline_query.query}'")
+    logger.info(f"⚙️ Inline-Query von {user.first_name} ({user.id})")
 
     keyboard = InlineKeyboardMarkup([[
         InlineKeyboardButton("Schere ✂️", callback_data="choice_scissors"),
@@ -176,13 +152,30 @@ async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE
                 f"{user.first_name} hat ein Spiel gestartet! Wähle deine Option:"
             ),
             reply_markup=keyboard,
-            description="Starte ein Spiel mit Auswahlbuttons.",
+            description="Starte ein Schere-Stein-Papier Spiel mit Auswahlbuttons",
         )
     ]
 
-    await update.inline_query.answer(results, cache_time=0, is_personal=True)
+    await update.inline_query.answer(results, cache_time=0)
 
-# --- FastAPI Endpunkte ---
+# --- Handler registrieren ---
+application.add_handler(CommandHandler("start", start_command))
+application.add_handler(CommandHandler("play", play_command))
+application.add_handler(CallbackQueryHandler(handle_callback))
+application.add_handler(InlineQueryHandler(handle_inline_query))
+
+# --- FastAPI & Lifespan ---
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await application.initialize()
+    await application.bot.set_webhook(WEBHOOK_URL)
+    logger.info(f"🌐 Webhook gesetzt auf: {WEBHOOK_URL}")
+    yield
+    await application.shutdown()
+
+app = FastAPI(lifespan=lifespan)
+
 @app.post("/webhook")
 async def telegram_webhook(request: Request):
     data = await request.json()
@@ -195,7 +188,6 @@ async def telegram_webhook(request: Request):
 async def root():
     return "✅ MatchingFloBot is running."
 
-# --- Optionaler manueller Start (lokal) ---
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run(app, host="0.0.0.0", port=10000)
