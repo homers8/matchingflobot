@@ -196,3 +196,6 @@ async def telegram_webhook(request: Request):
 @app.get("/", response_class=PlainTextResponse)
 async def root():
     return "✅ MatchingFloBot is running."
+if __name__ == "__main__":
+    import uvicorn
+    uvicorn.run("main:app", host="0.0.0.0", port=int(os.environ.get("PORT", 10000)))
