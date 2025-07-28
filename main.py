@@ -43,9 +43,9 @@ async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE
     try:
         results = [
             InlineQueryResultArticle(
-                id="simple-test",
-                title="🧪 Test",
-                input_message_content=InputTextMessageContent("Testantwort von MatchingFloBot")
+                id="test123",
+                title="🎮 Spiel starten",
+                input_message_content=InputTextMessageContent("Los geht's mit dem Spiel!")
             )
         ]
         await update.inline_query.answer(results, cache_time=0, is_personal=True)
