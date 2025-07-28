@@ -36,25 +36,18 @@ app = FastAPI(lifespan=lifespan)
 
 # Inline-Handler
 async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info("⚙️ Inline-Query Verarbeitung gestartet")
+
     try:
-        user = update.inline_query.from_user
-        logger.info(f"⚙️ Inline-Query von {user.first_name} ({user.id})")
-
-        results = [
-            InlineQueryResultArticle(
-                id=str(uuid.uuid4()),
-                title="🎲 Starte ein Spiel",
-                input_message_content=InputTextMessageContent("Ein neues Spiel wurde gestartet!"),
-                description="Einfacher Testartikel",
-            )
-        ]
-
-        await update.inline_query.answer(results, cache_time=0, is_personal=True)
-        logger.info("✅ Inline-Query beantwortet")
+        result = InlineQueryResultArticle(
+            id="test1",
+            title="🧪 Testartikel",
+            input_message_content=InputTextMessageContent("Dies ist ein Testartikel.")
+        )
+        await update.inline_query.answer([result], cache_time=0, is_personal=True)
+        logger.info("✅ Inline-Query erfolgreich beantwortet")
     except Exception as e:
-        logger.exception(f"❌ Fehler bei Inline-Query: {e}")
-
-application.add_handler(InlineQueryHandler(handle_inline_query))
+        logger.exception(f"❌ Fehler in handle_inline_query: {e}")
 
 # FastAPI Endpoints
 @app.post("/webhook")
