@@ -35,19 +35,23 @@ async def lifespan(app: FastAPI):
 app = FastAPI(lifespan=lifespan)
 
 # Inline-Handler
+from telegram import InlineQueryResultArticle, InputTextMessageContent
+
 async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.info("⚙️ Inline-Query Verarbeitung gestartet")
 
     try:
-        result = InlineQueryResultArticle(
-            id="test1",
-            title="🧪 Testartikel",
-            input_message_content=InputTextMessageContent("Dies ist ein Testartikel.")
-        )
-        await update.inline_query.answer([result], cache_time=0, is_personal=True)
+        results = [
+            InlineQueryResultArticle(
+                id="simple-test",
+                title="🧪 Test",
+                input_message_content=InputTextMessageContent("Testantwort von MatchingFloBot")
+            )
+        ]
+        await update.inline_query.answer(results, cache_time=0, is_personal=True)
         logger.info("✅ Inline-Query erfolgreich beantwortet")
     except Exception as e:
-        logger.exception(f"❌ Fehler in handle_inline_query: {e}")
+        logger.exception(f"❌ Fehler bei Inline-Query: {e}")
 
 # FastAPI Endpoints
 @app.post("/webhook")
