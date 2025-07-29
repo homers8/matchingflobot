@@ -22,7 +22,7 @@ if not TOKEN:
 
 # Telegram App
 application = Application.builder().token(TOKEN).updater(None).build()
-application.add_handler(InlineQueryHandler(lambda update, context: handle_inline_query(update, context)))  # ✅ Handler registrieren
+application.add_handler(InlineQueryHandler(handle_inline_query))  # ✅ Handler registrieren
 
 # FastAPI-App
 @asynccontextmanager
