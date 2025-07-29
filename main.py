@@ -81,11 +81,6 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("❌ Spiel nicht gefunden oder abgelaufen.")
         return
 
-    # Spielkontext prüfen
-    if query.message.chat.id != game["chat_id"]:
-        await query.answer("❌ Dieses Spiel läuft in einem anderen Chat.", show_alert=True)
-        return
-
     players = game["players"]
 
     # Wahl speichern
