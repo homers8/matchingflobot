@@ -10,7 +10,6 @@ from telegram import (
     InputTextMessageContent,
     InlineKeyboardMarkup,
     InlineKeyboardButton,
-    Message,
 )
 from telegram.ext import (
     Application,
@@ -50,17 +49,21 @@ async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE
     logger.info("⚙️ Inline-Query Verarbeitung gestartet")
     try:
         game_id = str(uuid.uuid4())
-        games[game_id] = {}
 
-        results = [
-            InlineQueryResultArticle(
-                id=game_id,
-                title="🎮 Starte Schere, Stein, Papier",
-                input_message_content=InputTextMessageContent("👥 Spiel gestartet. Bitte wähle eine Option."),
-                reply_markup=choice_keyboard(game_id),
-            )
-        ]
-        await update.inline_query.answer(results, cache_time=0, is_personal=True)
+        # Spiel initialisieren
+        games[game_id] = {
+            "players": {},  # user_id: choice
+            "chat_id": update.inline_query.from_user.id  # damit im Privatchat funktioniert
+        }
+
+        result = InlineQueryResultArticle(
+            id=game_id,
+            title="🎮 Starte Schere, Stein, Papier",
+            input_message_content=InputTextMessageContent("👥 Spiel gestartet. Bitte wähle eine Option."),
+            reply_markup=choice_keyboard(game_id),
+        )
+
+        await update.inline_query.answer([result], cache_time=0, is_personal=True)
         logger.info("✅ Inline-Query erfolgreich beantwortet")
     except Exception as e:
         logger.exception(f"❌ Fehler bei Inline-Query: {e}")
@@ -78,42 +81,47 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("❌ Spiel nicht gefunden oder abgelaufen.")
         return
 
-    # Wahl speichern, falls nicht schon gewählt
-    if user.id not in game:
-        game[user.id] = emoji
+    # Spielkontext prüfen
+    if query.message.chat.id != game["chat_id"]:
+        await query.answer("❌ Dieses Spiel läuft in einem anderen Chat.", show_alert=True)
+        return
+
+    players = game["players"]
+
+    # Wahl speichern
+    if user.id not in players:
+        players[user.id] = {"name": user.first_name, "choice": emoji}
     else:
         await query.answer("✅ Deine Wahl wurde bereits registriert.", show_alert=False)
         return
 
     # Wenn erst ein Spieler gewählt hat
-    if len(game) == 1:
+    if len(players) == 1:
         await query.edit_message_text(
             text=f"✅ {user.first_name} hat gewählt.",
             reply_markup=choice_keyboard(game_id),
         )
-    # Wenn beide gewählt haben: Ergebnis anzeigen
-    elif len(game) == 2:
-        players = list(game.items())
-        (id1, choice1), (id2, choice2) = players
-
-        name1 = context.bot_data.get(id1, user.full_name)
-        name2 = context.bot_data.get(id2, user.full_name)
+    elif len(players) == 2:
+        # Auswertung
+        users = list(players.values())
+        name1, choice1 = users[0]["name"], users[0]["choice"]
+        name2, choice2 = users[1]["name"], users[1]["choice"]
 
         result = evaluate_game(choice1, choice2)
-        result_text = f"{name1} wählte {CHOICES[choice1]} {choice1}\n{name2} wählte {CHOICES[choice2]} {choice2}\n\n{result}"
-
-        await query.edit_message_text(result_text)
+        text = (
+            f"{name1} wählte {CHOICES[choice1]} {choice1}\n"
+            f"{name2} wählte {CHOICES[choice2]} {choice2}\n\n"
+            f"{result}"
+        )
+        await query.edit_message_text(text)
         games.pop(game_id, None)
 
 # Spielauswertung
-def evaluate_game(choice1, choice2):
-    if choice1 == choice2:
+def evaluate_game(c1, c2):
+    if c1 == c2:
         return "🤝 Unentschieden!"
-    wins = {"✂️": "📄", "📄": "🪨", "🪨": "✂️"}
-    if wins[choice1] == choice2:
-        return "🏆 Spieler 1 gewinnt!"
-    else:
-        return "🏆 Spieler 2 gewinnt!"
+    beats = {"✂️": "📄", "📄": "🪨", "🪨": "✂️"}
+    return "🏆 Spieler 1 gewinnt!" if beats[c1] == c2 else "🏆 Spieler 2 gewinnt!"
 
 # Handler registrieren
 application.add_handler(InlineQueryHandler(handle_inline_query))
