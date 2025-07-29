@@ -29,9 +29,8 @@ WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://matchingflobot.onrender.com/webh
 if not TOKEN:
     raise RuntimeError("❌ TOKEN fehlt!")
 
-# In-Memory Stores
-games = {}         # game_id → Spielzustand
-stats = {}         # user_id → {"wins": 0, "losses": 0, "draws": 0}
+# In-Memory Game Store
+games = {}
 
 # Telegram App
 application = Application.builder().token(TOKEN).updater(None).build()
@@ -51,8 +50,9 @@ async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE
     try:
         game_id = str(uuid.uuid4())
 
+        # Spiel initialisieren
         games[game_id] = {
-            "players": {},  # user_id → {"name": str, "choice": str}
+            "players": {},  # user_id: {"name": ..., "choice": ...}
         }
 
         result = InlineQueryResultArticle(
@@ -84,7 +84,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Wahl speichern
     if user.id not in players:
-        players[user.id] = {"name": user.first_name, "choice": emoji}
+        players[user.id] = {
+            "name": f"{user.first_name} {user.last_name or ''}".strip(),
+            "choice": emoji,
+        }
     else:
         await query.answer("✅ Deine Wahl wurde bereits registriert.", show_alert=False)
         return
@@ -92,37 +95,25 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Wenn erst ein Spieler gewählt hat
     if len(players) == 1:
         await query.edit_message_text(
-            text=f"✅ {user.first_name} hat gewählt.",
+            text=f"✅ {players[user.id]['name']} hat gewählt.",
             reply_markup=choice_keyboard(game_id),
         )
+
     elif len(players) == 2:
-        # Auswertung
-        ids = list(players.keys())
-        user1, user2 = ids[0], ids[1]
-        p1, p2 = players[user1], players[user2]
-        name1, choice1 = p1["name"], p1["choice"]
-        name2, choice2 = p2["name"], p2["choice"]
+        # Zwei Spieler haben gewählt → Spiel auswerten
+        users = list(players.values())
+        name1, choice1 = users[0]["name"], users[0]["choice"]
+        name2, choice2 = users[1]["name"], users[1]["choice"]
 
         result = evaluate_game(choice1, choice2)
-
-        # Statistik aktualisieren
-        update_stats(user1, user2, result)
-
-        # Stats abrufen
-        s1 = stats[user1]
-        s2 = stats[user2]
-
-        # Ergebnis anzeigen inkl. Stats
         text = (
             f"{name1} wählte {CHOICES[choice1]} {choice1}\n"
             f"{name2} wählte {CHOICES[choice2]} {choice2}\n\n"
-            f"{result}\n\n"
-            f"📊 {name1}: {s1['wins']}🏆 {s1['losses']}❌ {s1['draws']}🤝\n"
-            f"📊 {name2}: {s2['wins']}🏆 {s2['losses']}❌ {s2['draws']}🤝"
+            f"{result}"
         )
-
         await query.edit_message_text(text)
-        games.pop(game_id, None)
+
+        # Hinweis: Spiel bleibt gespeichert (kann später per TTL gelöscht werden)
 
 # Spielauswertung
 def evaluate_game(c1, c2):
@@ -130,21 +121,6 @@ def evaluate_game(c1, c2):
         return "🤝 Unentschieden!"
     beats = {"✂️": "📄", "📄": "🪨", "🪨": "✂️"}
     return "🏆 Spieler 1 gewinnt!" if beats[c1] == c2 else "🏆 Spieler 2 gewinnt!"
-
-# Statistik aktualisieren
-def update_stats(uid1, uid2, result):
-    stats.setdefault(uid1, {"wins": 0, "losses": 0, "draws": 0})
-    stats.setdefault(uid2, {"wins": 0, "losses": 0, "draws": 0})
-
-    if "Unentschieden" in result:
-        stats[uid1]["draws"] += 1
-        stats[uid2]["draws"] += 1
-    elif "Spieler 1 gewinnt" in result:
-        stats[uid1]["wins"] += 1
-        stats[uid2]["losses"] += 1
-    elif "Spieler 2 gewinnt" in result:
-        stats[uid1]["losses"] += 1
-        stats[uid2]["wins"] += 1
 
 # Handler registrieren
 application.add_handler(InlineQueryHandler(handle_inline_query))
@@ -173,7 +149,7 @@ async def telegram_webhook(request: Request):
 
 @app.get("/", response_class=PlainTextResponse)
 async def root():
-    return "✅ MatchingFloBot läuft mit Statistik."
+    return "✅ MatchingFloBot läuft mit stabilem Spielablauf."
 
 if __name__ == "__main__":
     import uvicorn
