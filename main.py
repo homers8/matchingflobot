@@ -29,13 +29,22 @@ async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE
     logger.info("⚙️ Inline-Query Verarbeitung gestartet")
 
     try:
+        choices = [
+            ("✌️ Schere", "✌️ Du hast Schere gewählt!"),
+            ("✊ Stein", "✊ Du hast Stein gewählt!"),
+            ("🖐️ Papier", "🖐️ Du hast Papier gewählt!")
+        ]
+
         results = [
             InlineQueryResultArticle(
                 id=str(uuid.uuid4()),
-                title="🎮 Testantwort",
-                input_message_content=InputTextMessageContent("Dies ist eine Testantwort.")
+                title=title,
+                input_message_content=InputTextMessageContent(message),
+                description="Jetzt auswählen"
             )
+            for title, message in choices
         ]
+
         await update.inline_query.answer(results, cache_time=0, is_personal=True)
         logger.info("✅ Inline-Query erfolgreich beantwortet")
     except Exception as e:
