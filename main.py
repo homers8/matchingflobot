@@ -117,12 +117,14 @@ application.add_handler(CallbackQueryHandler(handle_callback))
 
 # FastAPI-Lifecycle
 @asynccontextmanager
+@asynccontextmanager
 async def lifespan(app: FastAPI):
     await application.initialize()
     await application.start()
     await application.bot.set_webhook(WEBHOOK_URL)
     logger.info(f"🌐 Webhook gesetzt: {WEBHOOK_URL}")
     yield
+    await application.stop()
     await application.shutdown()
 
 # FastAPI-App
