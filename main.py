@@ -76,14 +76,15 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     emoji = data.split(":")[1]
-    game_id = query.inline_message_id  # ← entscheidend!
+    game_id = query.inline_message_id
 
     if game_id not in games:
         games[game_id] = {"players": {}}
 
     players = games[game_id]["players"]
 
-    # Doppelte Wahl verhindern
+    logger.info(f"👤 Spieler klickt: {user.id} - {user.first_name} - Wahl: {emoji}")
+
     if user.id in players:
         await query.answer("✅ Deine Wahl wurde bereits registriert.", show_alert=False)
         return
@@ -92,6 +93,8 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "name": f"{user.first_name} {user.last_name or ''}".strip(),
         "choice": emoji,
     }
+
+    logger.info(f"🔄 Spielstand für {game_id}: {players}")
 
     if len(players) == 1:
         await context.bot.edit_message_text(
