@@ -105,7 +105,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # Spieler speichern
-    name = f"{user.first_name} {user.last_name or ''}".strip()
+    name = user.first_name
     players[user.id] = {"name": name, "choice": emoji}
     stats.setdefault(user.id, {"name": name, "win": 0, "lose": 0, "draw": 0})
 
