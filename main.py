@@ -1,6 +1,5 @@
 import os
 import logging
-import uuid
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
 from contextlib import asynccontextmanager
@@ -29,91 +28,20 @@ WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://matchingflobot.onrender.com/webh
 if not TOKEN:
     raise RuntimeError("❌ TOKEN fehlt!")
 
-# In-Memory Game Store
-games = {}
-
-# Telegram App
+# Telegram-App ohne Updater
 application = Application.builder().token(TOKEN).updater(None).build()
 
-# === SPIELABLAUF ===
+# In-Memory Spielstand
+games = {}
+
+# Spieloptionen
 CHOICES = {"✂️": "Schere", "🪨": "Stein", "📄": "Papier"}
 
-# Auswahl-Tastatur erzeugen
-def choice_keyboard(game_id):
+# Tastatur mit Wahlmöglichkeiten
+def choice_keyboard():
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(text=emoji, callback_data=f"{game_id}:{emoji}") for emoji in CHOICES.keys()]
+        [InlineKeyboardButton(text=emoji, callback_data=f"choice:{emoji}") for emoji in CHOICES]
     ])
-
-# Inline-Query verarbeiten
-async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info("⚙️ Inline-Query Verarbeitung gestartet")
-    try:
-        game_id = str(uuid.uuid4())
-
-        # Spiel initialisieren
-        games[game_id] = {
-            "players": {},  # user_id: {"name": ..., "choice": ...}
-        }
-
-        result = InlineQueryResultArticle(
-            id=game_id,
-            title="🎮 Starte Schere, Stein, Papier",
-            input_message_content=InputTextMessageContent("👥 Spiel gestartet. Bitte wähle eine Option."),
-            reply_markup=choice_keyboard(game_id),
-        )
-
-        await update.inline_query.answer([result], cache_time=0, is_personal=True)
-        logger.info("✅ Inline-Query erfolgreich beantwortet")
-    except Exception as e:
-        logger.exception(f"❌ Fehler bei Inline-Query: {e}")
-
-# Callback bei Button-Klick
-async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    query = update.callback_query
-    await query.answer()
-
-    user = query.from_user
-    game_id, emoji = query.data.split(":")
-
-    game = games.get(game_id)
-    if not game:
-        await query.edit_message_text("❌ Spiel nicht gefunden oder abgelaufen.")
-        return
-
-    players = game["players"]
-
-    # Wahl speichern
-    if user.id not in players:
-        players[user.id] = {
-            "name": f"{user.first_name} {user.last_name or ''}".strip(),
-            "choice": emoji,
-        }
-    else:
-        await query.answer("✅ Deine Wahl wurde bereits registriert.", show_alert=False)
-        return
-
-    # Wenn erst ein Spieler gewählt hat
-    if len(players) == 1:
-        await query.edit_message_text(
-            text=f"✅ {players[user.id]['name']} hat gewählt.",
-            reply_markup=choice_keyboard(game_id),
-        )
-
-    elif len(players) == 2:
-        # Zwei Spieler haben gewählt → Spiel auswerten
-        users = list(players.values())
-        name1, choice1 = users[0]["name"], users[0]["choice"]
-        name2, choice2 = users[1]["name"], users[1]["choice"]
-
-        result = evaluate_game(choice1, choice2)
-        text = (
-            f"{name1} wählte {CHOICES[choice1]} {choice1}\n"
-            f"{name2} wählte {CHOICES[choice2]} {choice2}\n\n"
-            f"{result}"
-        )
-        await query.edit_message_text(text)
-
-        # Hinweis: Spiel bleibt gespeichert (kann später per TTL gelöscht werden)
 
 # Spielauswertung
 def evaluate_game(c1, c2):
@@ -122,11 +50,72 @@ def evaluate_game(c1, c2):
     beats = {"✂️": "📄", "📄": "🪨", "🪨": "✂️"}
     return "🏆 Spieler 1 gewinnt!" if beats[c1] == c2 else "🏆 Spieler 2 gewinnt!"
 
+# Inline-Query-Handler
+async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    try:
+        result = InlineQueryResultArticle(
+            id="start-game",
+            title="🎮 Starte Schere, Stein, Papier",
+            input_message_content=InputTextMessageContent("👥 Spiel gestartet. Bitte wähle eine Option."),
+            reply_markup=choice_keyboard(),
+        )
+        await update.inline_query.answer([result], cache_time=0, is_personal=True)
+        logger.info("✅ Inline-Query beantwortet")
+    except Exception as e:
+        logger.exception(f"❌ Fehler bei Inline-Query: {e}")
+
+# Button-Klick-Handler
+async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+
+    user = query.from_user
+    data = query.data
+    if not data.startswith("choice:"):
+        return
+
+    emoji = data.split(":")[1]
+    game_id = query.inline_message_id  # ← entscheidend!
+
+    if game_id not in games:
+        games[game_id] = {"players": {}}
+
+    players = games[game_id]["players"]
+
+    if user.id in players:
+        await query.answer("✅ Deine Wahl wurde bereits registriert.", show_alert=False)
+        return
+
+    players[user.id] = {
+        "name": f"{user.first_name} {user.last_name or ''}".strip(),
+        "choice": emoji,
+    }
+
+    if len(players) == 1:
+        await context.bot.edit_message_text(
+            inline_message_id=game_id,
+            text=f"✅ {players[user.id]['name']} hat gewählt.\n⏳ Warte auf zweiten Spieler…",
+            reply_markup=choice_keyboard(),
+        )
+
+    elif len(players) == 2:
+        p1, p2 = list(players.values())
+        result_text = evaluate_game(p1["choice"], p2["choice"])
+        full_text = (
+            f"{p1['name']} wählte {CHOICES[p1['choice']]} {p1['choice']}\n"
+            f"{p2['name']} wählte {CHOICES[p2['choice']]} {p2['choice']}\n\n"
+            f"{result_text}"
+        )
+        await context.bot.edit_message_text(
+            inline_message_id=game_id,
+            text=full_text,
+        )
+
 # Handler registrieren
 application.add_handler(InlineQueryHandler(handle_inline_query))
 application.add_handler(CallbackQueryHandler(handle_callback))
 
-# FastAPI-Lebenszyklus
+# FastAPI-Lifecycle
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await application.initialize()
@@ -136,20 +125,19 @@ async def lifespan(app: FastAPI):
     yield
     await application.shutdown()
 
-# FastAPI App
+# FastAPI-App
 app = FastAPI(lifespan=lifespan)
 
 @app.post("/webhook")
 async def telegram_webhook(request: Request):
     data = await request.json()
-    logger.info(f"📬 Webhook empfangen: {data}")
     update = Update.de_json(data, application.bot)
     await application.update_queue.put(update)
     return {"ok": True}
 
 @app.get("/", response_class=PlainTextResponse)
 async def root():
-    return "✅ MatchingFloBot läuft mit stabilem Spielablauf."
+    return "✅ MatchingFloBot läuft erfolgreich auf Render."
 
 if __name__ == "__main__":
     import uvicorn
