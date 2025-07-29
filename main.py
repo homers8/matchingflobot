@@ -13,18 +13,36 @@ from telegram.ext import Application, ContextTypes, InlineQueryHandler
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Bot-Konfiguration
+# Konfiguration
 TOKEN = os.getenv("TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://matchingflobot.onrender.com/webhook")
 
 if not TOKEN:
     raise RuntimeError("❌ TOKEN fehlt!")
 
-# Telegram App
+# Telegram-Bot initialisieren
 application = Application.builder().token(TOKEN).updater(None).build()
-application.add_handler(InlineQueryHandler(handle_inline_query))  # ✅ Handler registrieren
 
-# FastAPI-App
+# Inline-Handler
+async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    logger.info("🟡 handle_inline_query wurde aufgerufen")
+
+    try:
+        results = [
+            InlineQueryResultArticle(
+                id=str(uuid.uuid4()),
+                title="🎮 Testantwort",
+                input_message_content=InputTextMessageContent("Dies ist eine Testantwort.")
+            )
+        ]
+        await update.inline_query.answer(results, cache_time=1, is_personal=True)
+        logger.info("✅ Inline-Query erfolgreich beantwortet")
+    except Exception as e:
+        logger.exception(f"❌ Fehler bei Inline-Query: {e}")
+
+application.add_handler(InlineQueryHandler(handle_inline_query))
+
+# FastAPI App mit Lifespan
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await application.initialize()
@@ -35,24 +53,6 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-# Inline-Handler
-async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    logger.info("⚙️ Inline-Query Verarbeitung gestartet")
-
-    try:
-        results = [
-            InlineQueryResultArticle(
-                id=str(uuid.uuid4()),
-                title="🎮 Testantwort",
-                input_message_content=InputTextMessageContent("Dies ist eine Testantwort.")
-            )
-        ]
-        await update.inline_query.answer(results, cache_time=0, is_personal=True)
-        logger.info("✅ Inline-Query erfolgreich beantwortet")
-    except Exception as e:
-        logger.exception(f"❌ Fehler bei Inline-Query: {e}")
-
-# Webhook-Endpoint für Telegram
 @app.post("/webhook")
 async def telegram_webhook(request: Request):
     data = await request.json()
@@ -61,12 +61,10 @@ async def telegram_webhook(request: Request):
     await application.update_queue.put(update)
     return {"ok": True}
 
-# Startseite
 @app.get("/", response_class=PlainTextResponse)
 async def root():
     return "✅ MatchingFloBot minimal läuft."
 
-# Lokaler Start
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
