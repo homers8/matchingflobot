@@ -43,12 +43,13 @@ def choice_keyboard():
         [InlineKeyboardButton(text=emoji, callback_data=f"choice:{emoji}") for emoji in CHOICES]
     ])
 
-# Spielauswertung
-def evaluate_game(c1, c2):
-    if c1 == c2:
+# Spielauswertung mit Spielernamen
+def evaluate_game(name1, choice1, name2, choice2):
+    if choice1 == choice2:
         return "🤝 Unentschieden!"
     beats = {"✂️": "📄", "📄": "🪨", "🪨": "✂️"}
-    return "🏆 Spieler 1 gewinnt!" if beats[c1] == c2 else "🏆 Spieler 2 gewinnt!"
+    winner = name1 if beats[choice1] == choice2 else name2
+    return f"🏆 {winner} gewinnt! 🎉"
 
 # Inline-Query-Handler
 async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -82,6 +83,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     players = games[game_id]["players"]
 
+    # Doppelte Wahl verhindern
     if user.id in players:
         await query.answer("✅ Deine Wahl wurde bereits registriert.", show_alert=False)
         return
@@ -100,7 +102,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     elif len(players) == 2:
         p1, p2 = list(players.values())
-        result_text = evaluate_game(p1["choice"], p2["choice"])
+        result_text = evaluate_game(p1["name"], p1["choice"], p2["name"], p2["choice"])
         full_text = (
             f"{p1['name']} wählte {CHOICES[p1['choice']]} {p1['choice']}\n"
             f"{p2['name']} wählte {CHOICES[p2['choice']]} {p2['choice']}\n\n"
@@ -116,7 +118,6 @@ application.add_handler(InlineQueryHandler(handle_inline_query))
 application.add_handler(CallbackQueryHandler(handle_callback))
 
 # FastAPI-Lifecycle
-@asynccontextmanager
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await application.initialize()
