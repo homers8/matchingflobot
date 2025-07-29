@@ -1,5 +1,6 @@
 import os
 import logging
+import time
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
 from contextlib import asynccontextmanager
@@ -31,11 +32,11 @@ if not TOKEN:
 # Telegram-App ohne Updater
 application = Application.builder().token(TOKEN).updater(None).build()
 
-# In-Memory Spielstand
-games = {}
-
 # Spieloptionen
 CHOICES = {"✂️": "Schere", "🪨": "Stein", "📄": "Papier"}
+
+# In-Memory Spielstand
+games = {}  # game_id → { players: {}, timestamp, stats: {} }
 
 # Tastatur mit Wahlmöglichkeiten
 def choice_keyboard():
@@ -43,45 +44,59 @@ def choice_keyboard():
         [InlineKeyboardButton(text=emoji, callback_data=f"choice:{emoji}") for emoji in CHOICES]
     ])
 
-# Spielauswertung mit Spielernamen
+# Tastatur für "Nochmal spielen"
+def play_again_keyboard():
+    return InlineKeyboardMarkup([
+        [InlineKeyboardButton(text="🔁 Nochmal spielen", switch_inline_query_current_chat="")]
+    ])
+
+# Spielauswertung + Statistik
 def evaluate_game(name1, choice1, name2, choice2):
     if choice1 == choice2:
-        return "🤝 Unentschieden!"
+        return None  # Unentschieden
     beats = {"✂️": "📄", "📄": "🪨", "🪨": "✂️"}
-    winner = name1 if beats[choice1] == choice2 else name2
-    return f"🏆 {winner} gewinnt! 🎉"
+    return name1 if beats[choice1] == choice2 else name2
+
+# Cleanup: Entferne alte Spiele (älter als 10 Min)
+def cleanup_old_games():
+    now = time.time()
+    to_delete = [gid for gid, g in games.items() if now - g.get("timestamp", 0) > 600]
+    for gid in to_delete:
+        del games[gid]
+        logger.info(f"🧹 Altes Spiel gelöscht: {gid}")
 
 # Inline-Query-Handler
 async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    try:
-        result = InlineQueryResultArticle(
-            id="start-game",
-            title="🎮 Starte Schere, Stein, Papier",
-            input_message_content=InputTextMessageContent("👥 Spiel gestartet. Bitte wähle eine Option."),
-            reply_markup=choice_keyboard(),
-        )
-        await update.inline_query.answer([result], cache_time=0, is_personal=True)
-        logger.info("✅ Inline-Query beantwortet")
-    except Exception as e:
-        logger.exception(f"❌ Fehler bei Inline-Query: {e}")
+    cleanup_old_games()
 
-# Button-Klick-Handler
+    result = InlineQueryResultArticle(
+        id="start-game",
+        title="🎮 Starte Schere, Stein, Papier",
+        input_message_content=InputTextMessageContent("👥 Spiel gestartet. Bitte wähle eine Option."),
+        reply_markup=choice_keyboard(),
+    )
+    await update.inline_query.answer([result], cache_time=0, is_personal=True)
+    logger.info("✅ Inline-Query beantwortet")
+
+# Callback-Handler (Button-Klicks)
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
-
     user = query.from_user
     data = query.data
+    game_id = query.inline_message_id
+
     if not data.startswith("choice:"):
         return
 
     emoji = data.split(":")[1]
-    game_id = query.inline_message_id
 
+    # Neues Spiel anlegen oder laden
     if game_id not in games:
-        games[game_id] = {"players": {}}
-
-    players = games[game_id]["players"]
+        games[game_id] = {"players": {}, "timestamp": time.time(), "stats": {}}
+    game = games[game_id]
+    players = game["players"]
+    stats = game["stats"]
 
     logger.info(f"👤 Spieler klickt: {user.id} - {user.first_name} - Wahl: {emoji}")
 
@@ -89,31 +104,54 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer("✅ Deine Wahl wurde bereits registriert.", show_alert=False)
         return
 
-    players[user.id] = {
-        "name": f"{user.first_name} {user.last_name or ''}".strip(),
-        "choice": emoji,
-    }
+    # Spieler speichern
+    name = f"{user.first_name} {user.last_name or ''}".strip()
+    players[user.id] = {"name": name, "choice": emoji}
+    stats.setdefault(user.id, {"name": name, "win": 0, "lose": 0, "draw": 0})
 
     logger.info(f"🔄 Spielstand für {game_id}: {players}")
 
     if len(players) == 1:
         await context.bot.edit_message_text(
             inline_message_id=game_id,
-            text=f"✅ {players[user.id]['name']} hat gewählt.\n⏳ Warte auf zweiten Spieler…",
+            text=f"✅ {name} hat gewählt.\n⏳ Warte auf zweiten Spieler…",
             reply_markup=choice_keyboard(),
         )
-
     elif len(players) == 2:
-        p1, p2 = list(players.values())
-        result_text = evaluate_game(p1["name"], p1["choice"], p2["name"], p2["choice"])
+        # Spiel auswerten
+        (id1, p1), (id2, p2) = players.items()
+        winner = evaluate_game(p1["name"], p1["choice"], p2["name"], p2["choice"])
+
+        if not winner:
+            stats[id1]["draw"] += 1
+            stats[id2]["draw"] += 1
+            medal1 = medal2 = "🤝"
+            result = "🤝 Unentschieden!"
+        elif winner == p1["name"]:
+            stats[id1]["win"] += 1
+            stats[id2]["lose"] += 1
+            medal1, medal2 = "🥇", "🥈"
+            result = f"🏆 {p1['name']} gewinnt!"
+        else:
+            stats[id2]["win"] += 1
+            stats[id1]["lose"] += 1
+            medal2, medal1 = "🥇", "🥈"
+            result = f"🏆 {p2['name']} gewinnt!"
+
+        # Ergebnis-Text
         full_text = (
-            f"{p1['name']} wählte {CHOICES[p1['choice']]} {p1['choice']}\n"
-            f"{p2['name']} wählte {CHOICES[p2['choice']]} {p2['choice']}\n\n"
-            f"{result_text}"
+            f"{medal1} {p1['name']} wählte {CHOICES[p1['choice']]} {p1['choice']}\n"
+            f"{medal2} {p2['name']} wählte {CHOICES[p2['choice']]} {p2['choice']}\n\n"
+            f"{result}\n\n"
+            f"📊 Statistik:\n"
+            f"• {stats[id1]['name']}: 🏆 {stats[id1]['win']}  ❌ {stats[id1]['lose']}  🤝 {stats[id1]['draw']}\n"
+            f"• {stats[id2]['name']}: 🏆 {stats[id2]['win']}  ❌ {stats[id2]['lose']}  🤝 {stats[id2]['draw']}"
         )
+
         await context.bot.edit_message_text(
             inline_message_id=game_id,
             text=full_text,
+            reply_markup=play_again_keyboard(),
         )
 
 # Handler registrieren
