@@ -179,8 +179,9 @@ async def telegram_webhook(request: Request):
     return {"ok": True}
 
 @app.get("/", response_class=PlainTextResponse)
-async def root():
-    return "✅ MatchingFloBot läuft erfolgreich auf Render."
+async def keep_alive():
+    print("✅ Keep-alive Ping erhalten!")
+    return "✅ MatchingFloBot läuft – aktiv durch echten Ping"
 
 if __name__ == "__main__":
     import uvicorn
