@@ -29,14 +29,14 @@ WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://matchingflobot.onrender.com/webh
 if not TOKEN:
     raise RuntimeError("❌ TOKEN fehlt!")
 
-# Telegram-App ohne Updater
 application = Application.builder().token(TOKEN).updater(None).build()
 
 # Spieloptionen
 CHOICES = {"✂️": "Schere", "🪨": "Stein", "📄": "Papier"}
 
-# In-Memory Spielstand
-games = {}  # game_id → { players: {}, timestamp, stats: {} }
+# Spielzustände & globale Session-Statistik
+games = {}  # game_id → { players: {}, timestamp }
+session_stats = {}  # user_id → {"name": ..., "win": ..., "lose": ..., "draw": ...}
 
 # Tastatur mit Wahlmöglichkeiten
 def choice_keyboard():
@@ -50,14 +50,14 @@ def play_again_keyboard():
         [InlineKeyboardButton(text="🔁 Nochmal spielen", switch_inline_query_current_chat="")]
     ])
 
-# Spielauswertung + Statistik
+# Spielauswertung
 def evaluate_game(name1, choice1, name2, choice2):
     if choice1 == choice2:
         return None  # Unentschieden
     beats = {"✂️": "📄", "📄": "🪨", "🪨": "✂️"}
     return name1 if beats[choice1] == choice2 else name2
 
-# Cleanup: Entferne alte Spiele (älter als 10 Min)
+# Cleanup veralteter Spiele (älter als 10 Minuten)
 def cleanup_old_games():
     now = time.time()
     to_delete = [gid for gid, g in games.items() if now - g.get("timestamp", 0) > 600]
@@ -78,7 +78,7 @@ async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.inline_query.answer([result], cache_time=0, is_personal=True)
     logger.info("✅ Inline-Query beantwortet")
 
-# Callback-Handler (Button-Klicks)
+# Callback-Handler für Button-Klicks
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -93,10 +93,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Neues Spiel anlegen oder laden
     if game_id not in games:
-        games[game_id] = {"players": {}, "timestamp": time.time(), "stats": {}}
+        games[game_id] = {"players": {}, "timestamp": time.time()}
     game = games[game_id]
     players = game["players"]
-    stats = game["stats"]
 
     logger.info(f"👤 Spieler klickt: {user.id} - {user.first_name} - Wahl: {emoji}")
 
@@ -104,10 +103,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.answer("✅ Deine Wahl wurde bereits registriert.", show_alert=False)
         return
 
-    # Spieler speichern
+    # Spieler registrieren
     name = user.first_name
     players[user.id] = {"name": name, "choice": emoji}
-    stats.setdefault(user.id, {"name": name, "win": 0, "lose": 0, "draw": 0})
+    session_stats.setdefault(user.id, {"name": name, "win": 0, "lose": 0, "draw": 0})
 
     logger.info(f"🔄 Spielstand für {game_id}: {players}")
 
@@ -123,18 +122,18 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         winner = evaluate_game(p1["name"], p1["choice"], p2["name"], p2["choice"])
 
         if not winner:
-            stats[id1]["draw"] += 1
-            stats[id2]["draw"] += 1
+            session_stats[id1]["draw"] += 1
+            session_stats[id2]["draw"] += 1
             medal1 = medal2 = "🤝"
             result = "🤝 Unentschieden!"
         elif winner == p1["name"]:
-            stats[id1]["win"] += 1
-            stats[id2]["lose"] += 1
+            session_stats[id1]["win"] += 1
+            session_stats[id2]["lose"] += 1
             medal1, medal2 = "🥇", "🥈"
             result = f"🏆 {p1['name']} gewinnt!"
         else:
-            stats[id2]["win"] += 1
-            stats[id1]["lose"] += 1
+            session_stats[id2]["win"] += 1
+            session_stats[id1]["lose"] += 1
             medal2, medal1 = "🥇", "🥈"
             result = f"🏆 {p2['name']} gewinnt!"
 
@@ -143,9 +142,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"{medal1} {p1['name']} wählte {CHOICES[p1['choice']]} {p1['choice']}\n"
             f"{medal2} {p2['name']} wählte {CHOICES[p2['choice']]} {p2['choice']}\n\n"
             f"{result}\n\n"
-            f"📊 Statistik:\n"
-            f"• {stats[id1]['name']}: 🏆 {stats[id1]['win']}  ❌ {stats[id1]['lose']}  🤝 {stats[id1]['draw']}\n"
-            f"• {stats[id2]['name']}: 🏆 {stats[id2]['win']}  ❌ {stats[id2]['lose']}  🤝 {stats[id2]['draw']}"
+            f"📊 Statistik (Session):\n"
+            f"• {session_stats[id1]['name']}: 🏆 {session_stats[id1]['win']}  ❌ {session_stats[id1]['lose']}  🤝 {session_stats[id1]['draw']}\n"
+            f"• {session_stats[id2]['name']}: 🏆 {session_stats[id2]['win']}  ❌ {session_stats[id2]['lose']}  🤝 {session_stats[id2]['draw']}"
         )
 
         await context.bot.edit_message_text(
@@ -158,7 +157,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 application.add_handler(InlineQueryHandler(handle_inline_query))
 application.add_handler(CallbackQueryHandler(handle_callback))
 
-# FastAPI-Lifecycle
+# FastAPI Lifecycle
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await application.initialize()
@@ -169,7 +168,7 @@ async def lifespan(app: FastAPI):
     await application.stop()
     await application.shutdown()
 
-# FastAPI-App
+# FastAPI App
 app = FastAPI(lifespan=lifespan)
 
 @app.post("/webhook")
