@@ -25,39 +25,30 @@ logger = logging.getLogger(__name__)
 # Bot-Konfiguration
 TOKEN = os.getenv("TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://matchingflobot.onrender.com/webhook")
-
 if not TOKEN:
     raise RuntimeError("❌ TOKEN fehlt!")
-
 application = Application.builder().token(TOKEN).updater(None).build()
 
-# Spieloptionen
 CHOICES = {"✂️": "Schere", "🪨": "Stein", "📄": "Papier"}
+games = {}  # game_id → { players: {user_id → {"name": ..., "choice": ...}}, timestamp }
+session_stats = {}  # frozenset(user_id1, user_id2) → {user_id → {"name": ..., "win": ..., "lose": ..., "draw": ...}}
 
-# Spielzustände & globale Session-Statistik
-games = {}  # game_id → { players: {}, timestamp }
-session_stats = {}  # user_id → {"name": ..., "win": ..., "lose": ..., "draw": ...}
-
-# Tastatur mit Wahlmöglichkeiten
 def choice_keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(text=emoji, callback_data=f"choice:{emoji}") for emoji in CHOICES]
     ])
 
-# Tastatur für "Nochmal spielen"
 def play_again_keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton(text="🔁 Nochmal spielen", switch_inline_query_current_chat="")]
     ])
 
-# Spielauswertung
-def evaluate_game(name1, choice1, name2, choice2):
+def evaluate_game(choice1, choice2):
     if choice1 == choice2:
-        return None  # Unentschieden
+        return None
     beats = {"✂️": "📄", "📄": "🪨", "🪨": "✂️"}
-    return name1 if beats[choice1] == choice2 else name2
+    return True if beats[choice1] == choice2 else False
 
-# Cleanup veralteter Spiele (älter als 10 Minuten)
 def cleanup_old_games():
     now = time.time()
     to_delete = [gid for gid, g in games.items() if now - g.get("timestamp", 0) > 600]
@@ -65,10 +56,8 @@ def cleanup_old_games():
         del games[gid]
         logger.info(f"🧹 Altes Spiel gelöscht: {gid}")
 
-# Inline-Query-Handler
 async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cleanup_old_games()
-
     result = InlineQueryResultArticle(
         id="start-game",
         title="🎮 Starte Schere, Stein, Papier",
@@ -78,11 +67,12 @@ async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE
     await update.inline_query.answer([result], cache_time=0, is_personal=True)
     logger.info("✅ Inline-Query beantwortet")
 
-# Callback-Handler für Button-Klicks
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     user = query.from_user
+    user_id = user.id
+    name = user.first_name
     data = query.data
     game_id = query.inline_message_id
 
@@ -91,24 +81,17 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     emoji = data.split(":")[1]
 
-    # Neues Spiel anlegen oder laden
-    if game_id not in games:
-        games[game_id] = {"players": {}, "timestamp": time.time()}
-    game = games[game_id]
+    # Spiel laden oder neu anlegen
+    game = games.setdefault(game_id, {"players": {}, "timestamp": time.time()})
     players = game["players"]
+    game["timestamp"] = time.time()  # Refresh timestamp bei Interaktion
 
-    logger.info(f"👤 Spieler klickt: {user.id} - {user.first_name} - Wahl: {emoji}")
-
-    if user.id in players:
+    if user_id in players:
         await query.answer("✅ Deine Wahl wurde bereits registriert.", show_alert=False)
         return
 
-    # Spieler registrieren
-    name = user.first_name
-    players[user.id] = {"name": name, "choice": emoji}
-    session_stats.setdefault(user.id, {"name": name, "win": 0, "lose": 0, "draw": 0})
-
-    logger.info(f"🔄 Spielstand für {game_id}: {players}")
+    players[user_id] = {"name": name, "choice": emoji}
+    logger.info(f"👤 {name} ({user_id}) hat gewählt: {emoji}")
 
     if len(players) == 1:
         await context.bot.edit_message_text(
@@ -116,48 +99,59 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             text=f"✅ {name} hat gewählt.\n⏳ Warte auf zweiten Spieler…",
             reply_markup=choice_keyboard(),
         )
-    elif len(players) == 2:
-        # Spiel auswerten
-        (id1, p1), (id2, p2) = players.items()
-        winner = evaluate_game(p1["name"], p1["choice"], p2["name"], p2["choice"])
+        return
 
-        if not winner:
-            session_stats[id1]["draw"] += 1
-            session_stats[id2]["draw"] += 1
-            medal1 = medal2 = "🤝"
-            result = "🤝 Unentschieden!"
-        elif winner == p1["name"]:
-            session_stats[id1]["win"] += 1
-            session_stats[id2]["lose"] += 1
-            medal1, medal2 = "🥇", "🥈"
-            result = f"🏆 {p1['name']} gewinnt!"
-        else:
-            session_stats[id2]["win"] += 1
-            session_stats[id1]["lose"] += 1
-            medal2, medal1 = "🥇", "🥈"
-            result = f"🏆 {p2['name']} gewinnt!"
+    if len(players) < 2:
+        return  # Sicherheitscheck
 
-        # Ergebnis-Text
-        full_text = (
-            f"{medal1} {p1['name']} wählte {CHOICES[p1['choice']]} {p1['choice']}\n"
-            f"{medal2} {p2['name']} wählte {CHOICES[p2['choice']]} {p2['choice']}\n\n"
-            f"{result}\n\n"
-            f"📊 Statistik (Session):\n"
-            f"• {session_stats[id1]['name']}: 🏆 {session_stats[id1]['win']}  ❌ {session_stats[id1]['lose']}  🤝 {session_stats[id1]['draw']}\n"
-            f"• {session_stats[id2]['name']}: 🏆 {session_stats[id2]['win']}  ❌ {session_stats[id2]['lose']}  🤝 {session_stats[id2]['draw']}"
-        )
+    # Zwei Spieler vorhanden → auswerten
+    (id1, p1), (id2, p2) = players.items()
+    result_text = ""
+    stats_key = frozenset([id1, id2])
 
-        await context.bot.edit_message_text(
-            inline_message_id=game_id,
-            text=full_text,
-            reply_markup=play_again_keyboard(),
-        )
+    # Initialisiere paarweise Statistik
+    if stats_key not in session_stats:
+        session_stats[stats_key] = {
+            id1: {"name": p1["name"], "win": 0, "lose": 0, "draw": 0},
+            id2: {"name": p2["name"], "win": 0, "lose": 0, "draw": 0},
+        }
+
+    winner_flag = evaluate_game(p1["choice"], p2["choice"])
+    if winner_flag is None:
+        result_text = "🤝 Unentschieden!"
+        session_stats[stats_key][id1]["draw"] += 1
+        session_stats[stats_key][id2]["draw"] += 1
+        medal1 = medal2 = "🤝"
+    elif winner_flag:
+        result_text = f"🏆 {p1['name']} gewinnt!"
+        session_stats[stats_key][id1]["win"] += 1
+        session_stats[stats_key][id2]["lose"] += 1
+        medal1, medal2 = "🥇", "🥈"
+    else:
+        result_text = f"🏆 {p2['name']} gewinnt!"
+        session_stats[stats_key][id2]["win"] += 1
+        session_stats[stats_key][id1]["lose"] += 1
+        medal2, medal1 = "🥇", "🥈"
+
+    text = (
+        f"{medal1} {p1['name']} wählte {CHOICES[p1['choice']]} {p1['choice']}\n"
+        f"{medal2} {p2['name']} wählte {CHOICES[p2['choice']]} {p2['choice']}\n\n"
+        f"{result_text}\n\n"
+        f"📊 Statistik (Session):\n"
+        f"• {session_stats[stats_key][id1]['name']}: 🏆 {session_stats[stats_key][id1]['win']}  ❌ {session_stats[stats_key][id1]['lose']}  🤝 {session_stats[stats_key][id1]['draw']}\n"
+        f"• {session_stats[stats_key][id2]['name']}: 🏆 {session_stats[stats_key][id2]['win']}  ❌ {session_stats[stats_key][id2]['lose']}  🤝 {session_stats[stats_key][id2]['draw']}"
+    )
+
+    await context.bot.edit_message_text(
+        inline_message_id=game_id,
+        text=text,
+        reply_markup=play_again_keyboard(),
+    )
 
 # Handler registrieren
 application.add_handler(InlineQueryHandler(handle_inline_query))
 application.add_handler(CallbackQueryHandler(handle_callback))
 
-# FastAPI Lifecycle
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     await application.initialize()
@@ -168,7 +162,6 @@ async def lifespan(app: FastAPI):
     await application.stop()
     await application.shutdown()
 
-# FastAPI App
 app = FastAPI(lifespan=lifespan)
 
 @app.post("/webhook")
