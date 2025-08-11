@@ -3,7 +3,7 @@ import logging
 import time
 import requests
 from fastapi import FastAPI, Request
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import PlainTextResponse, Response
 from contextlib import asynccontextmanager
 from telegram import (
     Update,
@@ -28,6 +28,7 @@ TOKEN = os.getenv("TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://matchingflobot.onrender.com/webhook")
 if not TOKEN:
     raise RuntimeError("❌ TOKEN fehlt!")
+
 application = Application.builder().token(TOKEN).updater(None).build()
 
 CHOICES = {"✂️": "Schere", "🪨": "Stein", "📄": "Papier"}
@@ -165,6 +166,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
+# Telegram Webhook
 @app.post("/webhook")
 async def telegram_webhook(request: Request):
     data = await request.json()
@@ -175,10 +177,13 @@ async def telegram_webhook(request: Request):
 # --- WhatsApp Webhook ---
 @app.get("/whatsapp")
 async def verify_whatsapp(request: Request):
-    params = request.query_params
-    if params.get("hub.mode") == "subscribe" and params.get("hub.verify_token") == VERIFY_TOKEN:
-        return PlainTextResponse(params.get("hub.challenge"))
-    return PlainTextResponse("Verifizierung fehlgeschlagen", status_code=403)
+    mode = request.query_params.get("hub.mode")
+    token = request.query_params.get("hub.verify_token")
+    challenge = request.query_params.get("hub.challenge")
+
+    if mode == "subscribe" and token == VERIFY_TOKEN:
+        return Response(content=challenge, media_type="text/plain")
+    return Response(content="Verification failed", status_code=403)
 
 @app.post("/whatsapp")
 async def whatsapp_webhook(request: Request):
@@ -212,21 +217,7 @@ async def whatsapp_webhook(request: Request):
 @app.get("/", response_class=PlainTextResponse)
 async def keep_alive():
     return "✅ MatchingFloBot läuft – Telegram + WhatsApp aktiv"
-from fastapi.responses import Response
 
-VERIFY_TOKEN = os.getenv("VERIFY_TOKEN", "testtoken123")
-
-@app.get("/whatsapp")
-async def verify_whatsapp(request: Request):
-    params = request.query_params
-    mode = params.get("hub.mode")
-    token = params.get("hub.verify_token")
-    challenge = params.get("hub.challenge")
-
-    if mode == "subscribe" and token == VERIFY_TOKEN:
-        return Response(content=challenge, media_type="text/plain")
-    else:
-        return Response(content="Verification failed", status_code=403)
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
