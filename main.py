@@ -1,6 +1,7 @@
 import os
 import logging
 import time
+import requests
 from fastapi import FastAPI, Request
 from fastapi.responses import PlainTextResponse
 from contextlib import asynccontextmanager
@@ -22,7 +23,7 @@ from telegram.ext import (
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Bot-Konfiguration
+# --- Telegram-Konfiguration ---
 TOKEN = os.getenv("TOKEN")
 WEBHOOK_URL = os.getenv("WEBHOOK_URL", "https://matchingflobot.onrender.com/webhook")
 if not TOKEN:
@@ -30,8 +31,8 @@ if not TOKEN:
 application = Application.builder().token(TOKEN).updater(None).build()
 
 CHOICES = {"✂️": "Schere", "🪨": "Stein", "📄": "Papier"}
-games = {}  # game_id → { players: {user_id → {"name": ..., "choice": ...}}, timestamp }
-session_stats = {}  # frozenset(user_id1, user_id2) → {user_id → {"name": ..., "win": ..., "lose": ..., "draw": ...}}
+games = {}
+session_stats = {}
 
 def choice_keyboard():
     return InlineKeyboardMarkup([
@@ -80,11 +81,9 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     emoji = data.split(":")[1]
-
-    # Spiel laden oder neu anlegen
     game = games.setdefault(game_id, {"players": {}, "timestamp": time.time()})
     players = game["players"]
-    game["timestamp"] = time.time()  # Refresh timestamp bei Interaktion
+    game["timestamp"] = time.time()
 
     if user_id in players:
         await query.answer("✅ Deine Wahl wurde bereits registriert.", show_alert=False)
@@ -102,14 +101,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     if len(players) < 2:
-        return  # Sicherheitscheck
+        return
 
-    # Zwei Spieler vorhanden → auswerten
     (id1, p1), (id2, p2) = players.items()
-    result_text = ""
     stats_key = frozenset([id1, id2])
 
-    # Initialisiere paarweise Statistik
     if stats_key not in session_stats:
         session_stats[stats_key] = {
             id1: {"name": p1["name"], "win": 0, "lose": 0, "draw": 0},
@@ -148,7 +144,12 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reply_markup=play_again_keyboard(),
     )
 
-# Handler registrieren
+# --- WhatsApp-Konfiguration ---
+WHATSAPP_TOKEN = os.getenv("WHATSAPP_TOKEN")
+WHATSAPP_PHONE_ID = os.getenv("WHATSAPP_PHONE_ID")
+VERIFY_TOKEN = os.getenv("VERIFY_TOKEN", "testtoken123")  # für Webhook-Verifizierung
+
+# Telegram Handler
 application.add_handler(InlineQueryHandler(handle_inline_query))
 application.add_handler(CallbackQueryHandler(handle_callback))
 
@@ -157,7 +158,7 @@ async def lifespan(app: FastAPI):
     await application.initialize()
     await application.start()
     await application.bot.set_webhook(WEBHOOK_URL)
-    logger.info(f"🌐 Webhook gesetzt: {WEBHOOK_URL}")
+    logger.info(f"🌐 Telegram Webhook gesetzt: {WEBHOOK_URL}")
     yield
     await application.stop()
     await application.shutdown()
@@ -171,10 +172,46 @@ async def telegram_webhook(request: Request):
     await application.update_queue.put(update)
     return {"ok": True}
 
+# --- WhatsApp Webhook ---
+@app.get("/whatsapp")
+async def verify_whatsapp(request: Request):
+    params = request.query_params
+    if params.get("hub.mode") == "subscribe" and params.get("hub.verify_token") == VERIFY_TOKEN:
+        return PlainTextResponse(params.get("hub.challenge"))
+    return PlainTextResponse("Verifizierung fehlgeschlagen", status_code=403)
+
+@app.post("/whatsapp")
+async def whatsapp_webhook(request: Request):
+    data = await request.json()
+    logger.info(f"📩 WhatsApp Webhook: {data}")
+
+    try:
+        entry = data["entry"][0]["changes"][0]["value"]["messages"][0]
+        from_number = entry["from"]
+        msg_text = entry["text"]["body"]
+
+        # Antwort senden
+        url = f"https://graph.facebook.com/v17.0/{WHATSAPP_PHONE_ID}/messages"
+        headers = {
+            "Authorization": f"Bearer {WHATSAPP_TOKEN}",
+            "Content-Type": "application/json"
+        }
+        payload = {
+            "messaging_product": "whatsapp",
+            "to": from_number,
+            "type": "text",
+            "text": {"body": f"Hallo! Du hast geschrieben: {msg_text}"}
+        }
+        requests.post(url, headers=headers, json=payload)
+
+    except Exception as e:
+        logger.error(f"Fehler im WhatsApp-Webhook: {e}")
+
+    return {"status": "ok"}
+
 @app.get("/", response_class=PlainTextResponse)
 async def keep_alive():
-    print("✅ Keep-alive Ping erhalten!")
-    return "✅ MatchingFloBot läuft – aktiv durch echten Ping"
+    return "✅ MatchingFloBot läuft – Telegram + WhatsApp aktiv"
 
 if __name__ == "__main__":
     import uvicorn
