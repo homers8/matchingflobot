@@ -212,7 +212,21 @@ async def whatsapp_webhook(request: Request):
 @app.get("/", response_class=PlainTextResponse)
 async def keep_alive():
     return "✅ MatchingFloBot läuft – Telegram + WhatsApp aktiv"
+from fastapi.responses import Response
 
+VERIFY_TOKEN = os.getenv("VERIFY_TOKEN", "testtoken123")
+
+@app.get("/whatsapp")
+async def verify_whatsapp(request: Request):
+    params = request.query_params
+    mode = params.get("hub.mode")
+    token = params.get("hub.verify_token")
+    challenge = params.get("hub.challenge")
+
+    if mode == "subscribe" and token == VERIFY_TOKEN:
+        return Response(content=challenge, media_type="text/plain")
+    else:
+        return Response(content="Verification failed", status_code=403)
 if __name__ == "__main__":
     import uvicorn
     uvicorn.run("main:app", host="0.0.0.0", port=int(os.getenv("PORT", 8000)))
