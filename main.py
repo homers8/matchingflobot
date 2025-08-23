@@ -31,25 +31,39 @@ if not TOKEN:
 
 application = Application.builder().token(TOKEN).updater(None).build()
 
-CHOICES = {"✂️": "Schere", "🪨": "Stein", "📄": "Papier"}
+# ---------------- Spieloptionen ----------------
+CHOICES_CLASSIC = {"✂️": "Schere", "🪨": "Stein", "📄": "Papier"}
+CHOICES_BRUNNEN = {"✂️": "Schere", "🪨": "Stein", "📄": "Papier", "⛲": "Brunnen"}
+
 games = {}
 session_stats = {}
 
-def choice_keyboard():
+def choice_keyboard(mode: str):
+    choices = CHOICES_CLASSIC if mode == "classic" else CHOICES_BRUNNEN
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(text=emoji, callback_data=f"choice:{emoji}") for emoji in CHOICES]
+        [InlineKeyboardButton(text=emoji, callback_data=f"{mode}:{emoji}") for emoji in choices]
     ])
 
-def play_again_keyboard():
+def play_again_keyboard(mode: str):
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(text="🔁 Nochmal spielen", switch_inline_query_current_chat="")]
+        [InlineKeyboardButton(text="🔁 Nochmal spielen", switch_inline_query_current_chat=f"{mode}")]
     ])
 
-def evaluate_game(choice1, choice2):
+def evaluate_game(choice1, choice2, mode):
     if choice1 == choice2:
         return None
-    beats = {"✂️": "📄", "📄": "🪨", "🪨": "✂️"}
-    return beats[choice1] == choice2
+
+    if mode == "classic":
+        beats = {"✂️": ["📄"], "📄": ["🪨"], "🪨": ["✂️"]}
+    else:  # brunnen
+        beats = {
+            "✂️": ["📄"],
+            "📄": ["🪨", "⛲"],
+            "🪨": ["✂️"],
+            "⛲": ["✂️", "🪨"]
+        }
+
+    return choice2 in beats.get(choice1, [])
 
 def cleanup_old_games():
     now = time.time()
@@ -61,13 +75,38 @@ def cleanup_old_games():
 # ---------------- Telegram Handler ----------------
 async def handle_inline_query(update: Update, context: ContextTypes.DEFAULT_TYPE):
     cleanup_old_games()
-    result = InlineQueryResultArticle(
-        id="start-game",
-        title="🎮 Starte Schere, Stein, Papier",
-        input_message_content=InputTextMessageContent("👥 Spiel gestartet. Bitte wähle eine Option."),
-        reply_markup=choice_keyboard(),
-    )
-    await update.inline_query.answer([result], cache_time=0, is_personal=True)
+    query = update.inline_query.query.strip().lower()
+
+    # Standardmäßig beide Modi anbieten
+    if query not in ["classic", "brunnen"]:
+        results = [
+            InlineQueryResultArticle(
+                id="start-classic",
+                title="🎮 Starte Schere, Stein, Papier",
+                description="Klassisch: ✂️🪨📄",
+                input_message_content=InputTextMessageContent("👥 Spiel gestartet (Klassisch). Bitte wähle eine Option."),
+                reply_markup=choice_keyboard("classic"),
+            ),
+            InlineQueryResultArticle(
+                id="start-brunnen",
+                title="🎮 Starte Schere, Stein, Papier, Brunnen",
+                description="Mit Brunnen: ✂️🪨📄⛲",
+                input_message_content=InputTextMessageContent("👥 Spiel gestartet (mit Brunnen). Bitte wähle eine Option."),
+                reply_markup=choice_keyboard("brunnen"),
+            ),
+        ]
+    else:
+        # Wenn der "Nochmal spielen"-Button einen Modus vorgibt
+        results = [
+            InlineQueryResultArticle(
+                id=f"start-{query}",
+                title=f"🎮 Starte Schere, Stein, Papier{' + Brunnen' if query == 'brunnen' else ''}",
+                input_message_content=InputTextMessageContent(f"👥 Spiel gestartet ({'mit Brunnen' if query == 'brunnen' else 'Klassisch'}). Bitte wähle eine Option."),
+                reply_markup=choice_keyboard(query),
+            )
+        ]
+
+    await update.inline_query.answer(results, cache_time=0, is_personal=True)
     logger.info("✅ Inline-Query beantwortet")
 
 async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -79,11 +118,11 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = query.data
     game_id = query.inline_message_id
 
-    if not data.startswith("choice:"):
+    if ":" not in data:
         return
 
-    emoji = data.split(":")[1]
-    game = games.setdefault(game_id, {"players": {}, "timestamp": time.time()})
+    mode, emoji = data.split(":")
+    game = games.setdefault(game_id, {"players": {}, "timestamp": time.time(), "mode": mode})
     players = game["players"]
     game["timestamp"] = time.time()
 
@@ -92,13 +131,13 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     players[user_id] = {"name": name, "choice": emoji}
-    logger.info(f"👤 {name} ({user_id}) hat gewählt: {emoji}")
+    logger.info(f"👤 {name} ({user_id}) hat gewählt: {emoji} [{mode}]")
 
     if len(players) == 1:
         await context.bot.edit_message_text(
             inline_message_id=game_id,
             text=f"✅ {name} hat gewählt.\n⏳ Warte auf zweiten Spieler…",
-            reply_markup=choice_keyboard(),
+            reply_markup=choice_keyboard(mode),
         )
         return
 
@@ -114,7 +153,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
             id2: {"name": p2["name"], "win": 0, "lose": 0, "draw": 0},
         }
 
-    winner_flag = evaluate_game(p1["choice"], p2["choice"])
+    winner_flag = evaluate_game(p1["choice"], p2["choice"], mode)
     if winner_flag is None:
         result_text = "🤝 Unentschieden!"
         session_stats[stats_key][id1]["draw"] += 1
@@ -131,9 +170,10 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         session_stats[stats_key][id1]["lose"] += 1
         medal2, medal1 = "🥇", "🥈"
 
+    choices = CHOICES_CLASSIC if mode == "classic" else CHOICES_BRUNNEN
     text = (
-        f"{medal1} {p1['name']} wählte {CHOICES[p1['choice']]} {p1['choice']}\n"
-        f"{medal2} {p2['name']} wählte {CHOICES[p2['choice']]} {p2['choice']}\n\n"
+        f"{medal1} {p1['name']} wählte {choices[p1['choice']]} {p1['choice']}\n"
+        f"{medal2} {p2['name']} wählte {choices[p2['choice']]} {p2['choice']}\n\n"
         f"{result_text}\n\n"
         f"📊 Statistik (Session):\n"
         f"• {session_stats[stats_key][id1]['name']}: 🏆 {session_stats[stats_key][id1]['win']}  ❌ {session_stats[stats_key][id1]['lose']}  🤝 {session_stats[stats_key][id1]['draw']}\n"
@@ -143,7 +183,7 @@ async def handle_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await context.bot.edit_message_text(
         inline_message_id=game_id,
         text=text,
-        reply_markup=play_again_keyboard(),
+        reply_markup=play_again_keyboard(mode),
     )
 
 application.add_handler(InlineQueryHandler(handle_inline_query))
