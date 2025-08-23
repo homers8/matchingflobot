@@ -46,7 +46,7 @@ def choice_keyboard(mode: str):
 
 def play_again_keyboard(mode: str):
     return InlineKeyboardMarkup([
-        [InlineKeyboardButton(text="🔁 Nochmal spielen", switch_inline_query_current_chat=f"{mode}")]
+        [InlineKeyboardButton(text="🔁 Nochmal spielen", switch_inline_query_current_chat="")]
     ])
 
 def evaluate_game(choice1, choice2, mode):
